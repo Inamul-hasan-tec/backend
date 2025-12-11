@@ -1,0 +1,1307 @@
+{
+  "info": {
+    "name": "Hall Sync API",
+    "description": "Complete API collection for Hall Sync - Marriage Hall Booking System",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_postman_id": "hall-sync-api-v1",
+    "version": "1.0.0"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:5000/api",
+      "type": "string"
+    },
+    {
+      "key": "authToken",
+      "value": "mock-jwt-token-for-development",
+      "type": "string"
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{authToken}}",
+        "type": "string"
+      }
+    ]
+  },
+  "item": [
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Login (Get Token)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var jsonData = pm.response.json();",
+                  "if (jsonData.success && jsonData.token) {",
+                  "    pm.collectionVariables.set('authToken', jsonData.token);",
+                  "    pm.test('Login successful', function() {",
+                  "        pm.expect(jsonData.success).to.be.true;",
+                  "    });",
+                  "    pm.test('Token saved', function() {",
+                  "        pm.expect(pm.collectionVariables.get('authToken')).to.exist;",
+                  "    });",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"admin\",\n  \"password\": \"admin123\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "login"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Current User",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/auth/user",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "user"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Health Check",
+      "item": [
+        {
+          "name": "Health Check",
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health",
+              "host": ["{{baseUrl}}"],
+              "path": ["health"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Customers",
+      "item": [
+        {
+          "name": "Get All Customers",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/customers",
+              "host": ["{{baseUrl}}"],
+              "path": ["customers"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Search Customers",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/customers/search?name=Rahul",
+              "host": ["{{baseUrl}}"],
+              "path": ["customers", "search"],
+              "query": [
+                {
+                  "key": "name",
+                  "value": "Rahul"
+                },
+                {
+                  "key": "phone",
+                  "value": "9876",
+                  "disabled": true
+                },
+                {
+                  "key": "city",
+                  "value": "Mumbai",
+                  "disabled": true
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Recent Customers",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/customers/recent?limit=5",
+              "host": ["{{baseUrl}}"],
+              "path": ["customers", "recent"],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "5"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Customer Stats",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/customers/stats",
+              "host": ["{{baseUrl}}"],
+              "path": ["customers", "stats"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Customer by ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/customers/1",
+              "host": ["{{baseUrl}}"],
+              "path": ["customers", "1"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Create Customer",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Test Customer Postman\",\n  \"phone\": \"9999888877\",\n  \"email\": \"testpostman@example.com\",\n  \"city\": \"Mumbai\",\n  \"state\": \"Maharashtra\",\n  \"pincode\": \"400001\",\n  \"address\": \"Test Address 123\",\n  \"event_type\": \"wedding\",\n  \"notes\": \"Created via Postman\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/customers",
+              "host": ["{{baseUrl}}"],
+              "path": ["customers"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Customer",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Updated Customer Name\",\n  \"city\": \"Delhi\",\n  \"notes\": \"Updated via Postman\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/customers/11",
+              "host": ["{{baseUrl}}"],
+              "path": ["customers", "11"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Customer",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/customers/11",
+              "host": ["{{baseUrl}}"],
+              "path": ["customers", "11"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Halls",
+      "item": [
+        {
+          "name": "Get All Halls",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/halls",
+              "host": ["{{baseUrl}}"],
+              "path": ["halls"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Search Halls",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/halls/search?name=Grand&status=active",
+              "host": ["{{baseUrl}}"],
+              "path": ["halls", "search"],
+              "query": [
+                {
+                  "key": "name",
+                  "value": "Grand"
+                },
+                {
+                  "key": "status",
+                  "value": "active"
+                },
+                {
+                  "key": "min_capacity",
+                  "value": "300",
+                  "disabled": true
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Active Halls",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/halls/active",
+              "host": ["{{baseUrl}}"],
+              "path": ["halls", "active"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Hall by ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/halls/1",
+              "host": ["{{baseUrl}}"],
+              "path": ["halls", "1"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Check Hall Availability",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/halls/1/availability?date=2025-12-20",
+              "host": ["{{baseUrl}}"],
+              "path": ["halls", "1", "availability"],
+              "query": [
+                {
+                  "key": "date",
+                  "value": "2025-12-20"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Hall Availability Range",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/halls/1/availability-range?date_from=2025-11-01&date_to=2025-12-31",
+              "host": ["{{baseUrl}}"],
+              "path": ["halls", "1", "availability-range"],
+              "query": [
+                {
+                  "key": "date_from",
+                  "value": "2025-11-01"
+                },
+                {
+                  "key": "date_to",
+                  "value": "2025-12-31"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Create Hall",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Test Hall Postman\",\n  \"capacity\": 350,\n  \"base_price\": 55000,\n  \"description\": \"Test hall created via Postman\",\n  \"location\": \"Test Location, Mumbai\",\n  \"amenities\": \"AC, Parking, Catering\",\n  \"status\": \"active\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/halls",
+              "host": ["{{baseUrl}}"],
+              "path": ["halls"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Hall",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"base_price\": 60000,\n  \"description\": \"Updated via Postman\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/halls/6",
+              "host": ["{{baseUrl}}"],
+              "path": ["halls", "6"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Hall",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/halls/6",
+              "host": ["{{baseUrl}}"],
+              "path": ["halls", "6"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Packages",
+      "item": [
+        {
+          "name": "Get All Packages",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/packages",
+              "host": ["{{baseUrl}}"],
+              "path": ["packages"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Search Packages",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/packages/search?name=Gold&status=active",
+              "host": ["{{baseUrl}}"],
+              "path": ["packages", "search"],
+              "query": [
+                {
+                  "key": "name",
+                  "value": "Gold"
+                },
+                {
+                  "key": "status",
+                  "value": "active"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Active Packages",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/packages/active",
+              "host": ["{{baseUrl}}"],
+              "path": ["packages", "active"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Popular Packages",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/packages/popular?limit=3",
+              "host": ["{{baseUrl}}"],
+              "path": ["packages", "popular"],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "3"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Package by ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/packages/1",
+              "host": ["{{baseUrl}}"],
+              "path": ["packages", "1"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Create Package",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Test Package Postman\",\n  \"base_price\": 85000,\n  \"description\": \"Test package created via Postman\",\n  \"inclusions\": \"Decoration, Catering, DJ, Photography\",\n  \"status\": \"active\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/packages",
+              "host": ["{{baseUrl}}"],
+              "path": ["packages"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Package",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"base_price\": 90000,\n  \"description\": \"Updated via Postman\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/packages/7",
+              "host": ["{{baseUrl}}"],
+              "path": ["packages", "7"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Package",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/packages/7",
+              "host": ["{{baseUrl}}"],
+              "path": ["packages", "7"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Bookings",
+      "item": [
+        {
+          "name": "Get All Bookings",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/bookings",
+              "host": ["{{baseUrl}}"],
+              "path": ["bookings"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Search Bookings",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/bookings/search?status=confirmed",
+              "host": ["{{baseUrl}}"],
+              "path": ["bookings", "search"],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "confirmed"
+                },
+                {
+                  "key": "customer_id",
+                  "value": "1",
+                  "disabled": true
+                },
+                {
+                  "key": "hall_id",
+                  "value": "1",
+                  "disabled": true
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Upcoming Bookings",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/bookings/upcoming?limit=5",
+              "host": ["{{baseUrl}}"],
+              "path": ["bookings", "upcoming"],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "5"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Today's Bookings",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/bookings/today",
+              "host": ["{{baseUrl}}"],
+              "path": ["bookings", "today"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Booking Stats",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/bookings/stats",
+              "host": ["{{baseUrl}}"],
+              "path": ["bookings", "stats"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Booking by ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/bookings/1",
+              "host": ["{{baseUrl}}"],
+              "path": ["bookings", "1"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Create Booking",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"customer_id\": 1,\n  \"hall_id\": 2,\n  \"package_id\": 3,\n  \"event_date\": \"2025-12-28\",\n  \"event_type\": \"wedding\",\n  \"guest_count\": 350,\n  \"total_amount\": 150000,\n  \"advance_amount\": 75000,\n  \"payment_mode\": \"card\",\n  \"notes\": \"Created via Postman\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/bookings",
+              "host": ["{{baseUrl}}"],
+              "path": ["bookings"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Booking",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"guest_count\": 400,\n  \"notes\": \"Updated guest count via Postman\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/bookings/11",
+              "host": ["{{baseUrl}}"],
+              "path": ["bookings", "11"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Confirm Booking",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/bookings/11/confirm",
+              "host": ["{{baseUrl}}"],
+              "path": ["bookings", "11", "confirm"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Cancel Booking",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/bookings/11/cancel",
+              "host": ["{{baseUrl}}"],
+              "path": ["bookings", "11", "cancel"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Complete Booking",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/bookings/1/complete",
+              "host": ["{{baseUrl}}"],
+              "path": ["bookings", "1", "complete"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Business Configuration (GST)",
+      "item": [
+        {
+          "name": "Get Business Configuration",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/business-config",
+              "host": ["{{baseUrl}}"],
+              "path": ["business-config"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Business Configuration",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"business_name\": \"Updated Hall Name\",\n  \"phone\": \"+91-9999999999\",\n  \"email\": \"updated@hallsync.com\",\n  \"advance_percentage\": 30,\n  \"cancellation_rules\": [\n    {\"days_before_event\": 90, \"refund_percentage\": 100},\n    {\"days_before_event\": 60, \"refund_percentage\": 75},\n    {\"days_before_event\": 30, \"refund_percentage\": 50},\n    {\"days_before_event\": 0, \"refund_percentage\": 0}\n  ]\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/business-config/1",
+              "host": ["{{baseUrl}}"],
+              "path": ["business-config", "1"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Validate GSTIN",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/business-config/validate-gstin/29ABCDE1234F1Z5",
+              "host": ["{{baseUrl}}"],
+              "path": ["business-config", "validate-gstin", "29ABCDE1234F1Z5"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get State Codes",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/business-config/state-codes",
+              "host": ["{{baseUrl}}"],
+              "path": ["business-config", "state-codes"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Service Catalog (GST)",
+      "item": [
+        {
+          "name": "Get All Services",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/services",
+              "host": ["{{baseUrl}}"],
+              "path": ["services"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Services with Filters",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/services?category=VENUE_RENTAL&is_active=true&search=ballroom",
+              "host": ["{{baseUrl}}"],
+              "path": ["services"],
+              "query": [
+                {
+                  "key": "category",
+                  "value": "VENUE_RENTAL"
+                },
+                {
+                  "key": "is_active",
+                  "value": "true"
+                },
+                {
+                  "key": "search",
+                  "value": "ballroom"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Active Services Only",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/services/active",
+              "host": ["{{baseUrl}}"],
+              "path": ["services", "active"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Services by Category",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/services/category/CATERING_INHOUSE",
+              "host": ["{{baseUrl}}"],
+              "path": ["services", "category", "CATERING_INHOUSE"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Service Categories",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/services/categories",
+              "host": ["{{baseUrl}}"],
+              "path": ["services", "categories"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Service by ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/services/1",
+              "host": ["{{baseUrl}}"],
+              "path": ["services", "1"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Create Service",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"service_code\": \"SRV_TEST\",\n  \"name\": \"Test Premium Package\",\n  \"category\": \"VENUE_RENTAL\",\n  \"base_price\": 75000.00,\n  \"unit\": \"day\",\n  \"min_quantity\": 1,\n  \"max_quantity\": 1,\n  \"sac_code\": \"9972\",\n  \"gst_rate\": 18.00,\n  \"is_taxable\": true,\n  \"description\": \"Premium venue package with all amenities\",\n  \"inclusions\": \"AC Hall, Stage, Green Room, Parking\",\n  \"terms\": \"Booking requires 25% advance\",\n  \"is_active\": true,\n  \"display_order\": 0\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/services",
+              "host": ["{{baseUrl}}"],
+              "path": ["services"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Service",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"base_price\": 80000.00,\n  \"description\": \"Updated premium package with enhanced features\",\n  \"gst_rate\": 18.00\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/services/1",
+              "host": ["{{baseUrl}}"],
+              "path": ["services", "1"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Service (Soft Delete)",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/services/1",
+              "host": ["{{baseUrl}}"],
+              "path": ["services", "1"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Reorder Services",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"updates\": [\n    {\"id\": 1, \"display_order\": 0},\n    {\"id\": 2, \"display_order\": 1},\n    {\"id\": 3, \"display_order\": 2}\n  ]\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/services/reorder",
+              "host": ["{{baseUrl}}"],
+              "path": ["services", "reorder"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Invoices (GST)",
+      "item": [
+        {
+          "name": "Get All Invoices",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/invoices",
+              "host": ["{{baseUrl}}"],
+              "path": ["invoices"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Invoices with Filters",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/invoices?status=issued&invoice_type=tax_invoice&from_date=2025-01-01",
+              "host": ["{{baseUrl}}"],
+              "path": ["invoices"],
+              "query": [
+                {"key": "status", "value": "issued"},
+                {"key": "invoice_type", "value": "tax_invoice"},
+                {"key": "from_date", "value": "2025-01-01"},
+                {"key": "to_date", "value": "2025-12-31", "disabled": true},
+                {"key": "customer_id", "value": "1", "disabled": true},
+                {"key": "search", "value": "INV", "disabled": true}
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Invoice Summary",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/invoices/summary",
+              "host": ["{{baseUrl}}"],
+              "path": ["invoices", "summary"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Invoice by ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/invoices/1",
+              "host": ["{{baseUrl}}"],
+              "path": ["invoices", "1"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Invoice by Number",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/invoices/number/INV-2025-0001",
+              "host": ["{{baseUrl}}"],
+              "path": ["invoices", "number", "INV-2025-0001"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Invoices by Booking",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/invoices/booking/1",
+              "host": ["{{baseUrl}}"],
+              "path": ["invoices", "booking", "1"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Invoices by Customer",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/invoices/customer/1",
+              "host": ["{{baseUrl}}"],
+              "path": ["invoices", "customer", "1"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Generate Invoice Number",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/invoices/generate-number/tax_invoice",
+              "host": ["{{baseUrl}}"],
+              "path": ["invoices", "generate-number", "tax_invoice"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Create Tax Invoice",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"invoice_type\": \"tax_invoice\",\n  \"customer_id\": 1,\n  \"booking_id\": 1,\n  \"line_items\": [\n    {\n      \"description\": \"Grand Ballroom - Full Day Rental\",\n      \"sac_hsn\": \"9972\",\n      \"quantity\": 1,\n      \"unit\": \"day\",\n      \"unit_price\": 50000.00,\n      \"gst_rate\": 18.00,\n      \"service_id\": 1\n    },\n    {\n      \"description\": \"Vegetarian Catering - 300 plates\",\n      \"sac_hsn\": \"9963\",\n      \"quantity\": 300,\n      \"unit\": \"plate\",\n      \"unit_price\": 450.00,\n      \"discount_percentage\": 10,\n      \"gst_rate\": 5.00,\n      \"service_id\": 5\n    }\n  ],\n  \"notes\": \"Thank you for your business!\",\n  \"terms_conditions\": \"Payment due within 30 days\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/invoices",
+              "host": ["{{baseUrl}}"],
+              "path": ["invoices"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Create Receipt Voucher",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"invoice_type\": \"receipt_voucher\",\n  \"customer_id\": 1,\n  \"booking_id\": 1,\n  \"line_items\": [\n    {\n      \"description\": \"Advance Payment for Booking\",\n      \"sac_hsn\": \"9972\",\n      \"quantity\": 1,\n      \"unit\": \"nos\",\n      \"unit_price\": 50000.00,\n      \"gst_rate\": 0.00\n    }\n  ],\n  \"notes\": \"Advance payment received\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/invoices",
+              "host": ["{{baseUrl}}"],
+              "path": ["invoices"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Invoice",
+          "request": {
+            "method": "PUT",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"notes\": \"Updated notes\",\n  \"payment_instructions\": \"Please pay via bank transfer\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/invoices/1",
+              "host": ["{{baseUrl}}"],
+              "path": ["invoices", "1"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Issue Invoice",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/invoices/1/issue",
+              "host": ["{{baseUrl}}"],
+              "path": ["invoices", "1", "issue"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Cancel Invoice",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Customer requested cancellation\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/invoices/1/cancel",
+              "host": ["{{baseUrl}}"],
+              "path": ["invoices", "1", "cancel"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Record Payment",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"payment_date\": \"2025-11-19\",\n  \"amount\": 50000.00,\n  \"payment_mode\": \"upi\",\n  \"transaction_reference\": \"UPI123456789\",\n  \"notes\": \"Partial payment received\",\n  \"allocations\": [\n    {\n      \"invoice_id\": 1,\n      \"amount\": 50000.00\n    }\n  ]\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/invoices/payment",
+              "host": ["{{baseUrl}}"],
+              "path": ["invoices", "payment"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Dashboard",
+      "item": [
+        {
+          "name": "Get Dashboard Stats",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/dashboard/stats",
+              "host": ["{{baseUrl}}"],
+              "path": ["dashboard", "stats"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Revenue Chart",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/dashboard/revenue-chart?months=6",
+              "host": ["{{baseUrl}}"],
+              "path": ["dashboard", "revenue-chart"],
+              "query": [
+                {
+                  "key": "months",
+                  "value": "6"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Booking Status Distribution",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/dashboard/booking-status",
+              "host": ["{{baseUrl}}"],
+              "path": ["dashboard", "booking-status"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Popular Halls",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/dashboard/popular-halls?limit=5",
+              "host": ["{{baseUrl}}"],
+              "path": ["dashboard", "popular-halls"],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "5"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Event Type Distribution",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/dashboard/event-types",
+              "host": ["{{baseUrl}}"],
+              "path": ["dashboard", "event-types"]
+            }
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,47 @@
+services:
+  - type: web
+    name: hall-sync-backend
+    env: node
+    region: singapore
+    plan: free
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 5000
+      - key: DB_HOST
+        value: sql12.freesqldatabase.com
+      - key: DB_PORT
+        value: 3306
+      - key: DB_USER
+        value: sql12811442
+      - key: DB_PASSWORD
+        value: q7UHJn19md
+      - key: DB_NAME
+        value: sql12811442
+      - key: DB_CONNECTION_LIMIT
+        value: 10
+      - key: DB_QUEUE_LIMIT
+        value: 0
+      - key: JWT_SECRET
+        value: hall-sync-secret-key-2025-production-ready-min-32-characters
+      - key: JWT_EXPIRES_IN
+        value: 7d
+      - key: BCRYPT_ROUNDS
+        value: 10
+      - key: API_PREFIX
+        value: /api
+      - key: CORS_ORIGIN
+        value: "*"
+      - key: LOG_LEVEL
+        value: info
+      - key: SMTP_HOST
+        value: smtp.gmail.com
+      - key: SMTP_PORT
+        value: 587
+      - key: SMTP_USER
+        value: hasaninamul678@gmail.com
+      - key: SMTP_PASS
+        value: cthl mtod odly wqou
