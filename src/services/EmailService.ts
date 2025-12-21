@@ -59,6 +59,12 @@ export class EmailService {
     const timeout = 10000; // 10 second timeout
     
     try {
+      // Check if email is enabled
+      if (process.env.SMTP_ENABLED === 'false') {
+        console.log('📧 Email sending disabled via SMTP_ENABLED env var');
+        return;
+      }
+
       // Validate email address
       if (!data.customer_email || !data.customer_email.includes('@')) {
         console.warn(`⚠️ Invalid email address: ${data.customer_email}`);
