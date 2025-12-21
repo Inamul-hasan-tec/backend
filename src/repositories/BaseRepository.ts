@@ -19,19 +19,20 @@ export class BaseRepository<T> {
    */
   async findAll(limit?: number, offset?: number): Promise<T[]> {
     let sql = `SELECT * FROM ${this.tableName}`;
-    const params: any[] = [];
 
-    if (limit) {
-      sql += ' LIMIT ?';
-      params.push(limit);
+    // MySQL doesn't support ? placeholders for LIMIT/OFFSET in prepared statements
+    // Use direct values instead (safe because we validate they're numbers)
+    if (limit !== undefined && limit > 0) {
+      const safeLimit = Math.floor(Math.abs(limit)); // Ensure positive integer
+      sql += ` LIMIT ${safeLimit}`;
     }
 
-    if (offset) {
-      sql += ' OFFSET ?';
-      params.push(offset);
+    if (offset !== undefined && offset >= 0) {
+      const safeOffset = Math.floor(Math.abs(offset)); // Ensure non-negative integer
+      sql += ` OFFSET ${safeOffset}`;
     }
 
-    const [rows] = await pool.execute<RowDataPacket[]>(sql, params);
+    const [rows] = await pool.execute<RowDataPacket[]>(sql);
     return rows as T[];
   }
 
