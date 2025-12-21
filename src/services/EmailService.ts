@@ -53,10 +53,18 @@ export class EmailService {
   }
 
   /**
-   * Send booking confirmation email
+   * Send booking confirmation email with timeout
    */
   async sendBookingConfirmation(data: BookingEmailData): Promise<void> {
+    const timeout = 10000; // 10 second timeout
+    
     try {
+      // Validate email address
+      if (!data.customer_email || !data.customer_email.includes('@')) {
+        console.warn(`⚠️ Invalid email address: ${data.customer_email}`);
+        return; // Skip sending email
+      }
+
       const timeSlotText = data.time_slot === 'morning' ? 'Morning (6AM-12PM)' :
                           data.time_slot === 'afternoon' ? 'Afternoon (12PM-6PM)' :
                           'Night (6PM-12AM)';
@@ -73,11 +81,17 @@ export class EmailService {
         html: this.getBookingConfirmationTemplate(data, timeSlotText, eventDate, dueDateText),
       };
 
-      await this.transporter.sendMail(mailOptions);
+      // Add timeout to prevent hanging
+      const emailPromise = this.transporter.sendMail(mailOptions);
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Email timeout')), timeout)
+      );
+
+      await Promise.race([emailPromise, timeoutPromise]);
       console.log(`✅ Booking confirmation email sent to ${data.customer_email}`);
-    } catch (error) {
-      console.error('❌ Error sending booking confirmation email:', error);
-      throw error;
+    } catch (error: any) {
+      console.error('❌ Error sending booking confirmation email:', error.message);
+      // Don't throw - let the booking succeed even if email fails
     }
   }
 

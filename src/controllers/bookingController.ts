@@ -16,10 +16,18 @@ const bookingService = new BookingService();
  * Get all bookings
  */
 export const getAllBookings = asyncHandler(async (req: Request, res: Response) => {
-  const limit = req.query.limit ? parseInt(req.query.limit as string) : undefined;
-  const offset = req.query.offset ? parseInt(req.query.offset as string) : undefined;
+  const startTime = Date.now();
+  
+  // Default pagination to prevent fetching too much data
+  const limit = req.query.limit ? parseInt(req.query.limit as string) : 50;
+  const offset = req.query.offset ? parseInt(req.query.offset as string) : 0;
 
+  console.log(`📚 Fetching bookings with limit: ${limit}, offset: ${offset}`);
+  
   const bookings = await bookingService.getAllBookings(limit, offset);
+  
+  console.log(`✅ Retrieved ${bookings.length} bookings in ${Date.now() - startTime}ms`);
+  
   res.json(successResponse('Bookings retrieved successfully', bookings));
 });
 
@@ -90,15 +98,29 @@ export const getBookingById = asyncHandler(async (req: Request, res: Response) =
  * Create new booking
  */
 export const createBooking = asyncHandler(async (req: Request, res: Response) => {
-  const bookingId = await bookingService.createBooking(req.body);
-  const booking = await bookingService.getBookingById(bookingId);
+  const startTime = Date.now();
+  console.log('📝 Creating booking:', { customer_id: req.body.customer_id, hall_id: req.body.hall_id, event_date: req.body.event_date });
   
-  // Send confirmation email
-  if (booking) {
-    try {
-      await EmailService.sendBookingConfirmation({
+  try {
+    // Create booking
+    const bookingId = await bookingService.createBooking(req.body);
+    console.log(`✅ Booking created with ID: ${bookingId} in ${Date.now() - startTime}ms`);
+    
+    // Fetch booking details
+    const booking = await bookingService.getBookingById(bookingId);
+    console.log(`📋 Booking details fetched in ${Date.now() - startTime}ms`);
+    
+    if (!booking) {
+      console.error('❌ Booking not found after creation:', bookingId);
+      return res.status(500).json(errorResponse('Failed to retrieve created booking'));
+    }
+    
+    // Send confirmation email asynchronously (don't await)
+    // This prevents email delays from blocking the response
+    if (booking.customer_email) {
+      EmailService.sendBookingConfirmation({
         customer_name: booking.customer_name || 'Customer',
-        customer_email: booking.customer_email || '',
+        customer_email: booking.customer_email,
         booking_id: booking.id,
         hall_name: booking.hall_name || 'Hall',
         event_date: booking.event_date ? new Date(booking.event_date).toISOString() : new Date().toISOString(),
@@ -108,14 +130,24 @@ export const createBooking = asyncHandler(async (req: Request, res: Response) =>
         advance_paid: typeof booking.advance_amount === 'string' ? parseFloat(booking.advance_amount) : booking.advance_amount,
         balance_amount: typeof booking.balance_amount === 'string' ? parseFloat(booking.balance_amount) : booking.balance_amount,
         payment_mode: booking.payment_mode || 'cash',
+      }).catch(emailError => {
+        console.error('❌ Failed to send confirmation email:', emailError.message);
+        // Email failure doesn't affect booking creation
       });
-    } catch (emailError) {
-      console.error('Failed to send confirmation email:', emailError);
-      // Don't fail the booking if email fails
     }
+    
+    console.log(`🎉 Booking creation completed in ${Date.now() - startTime}ms`);
+    res.status(201).json(successResponse('Booking created successfully', booking));
+    
+  } catch (error: any) {
+    console.error('❌ Error creating booking:', {
+      message: error.message,
+      stack: error.stack,
+      body: req.body,
+      duration: `${Date.now() - startTime}ms`
+    });
+    throw error; // Let asyncHandler handle it
   }
-  
-  res.status(201).json(successResponse('Booking created successfully', booking));
 });
 
 /**
