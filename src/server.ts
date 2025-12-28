@@ -25,7 +25,7 @@ const API_PREFIX = process.env.API_PREFIX || '/api';
 
 // CORS configuration
 app.use(cors({
-  origin: process.env.CORS_ORIGIN || 'http://localhost:5173',
+  origin: process.env.CORS_ORIGIN || 'http://localhost:5173'||'http://localhost:8001',
   credentials: true,
 }));
 
