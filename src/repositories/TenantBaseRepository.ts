@@ -54,7 +54,7 @@ export class TenantBaseRepository<T> {
     const dataWithTenant = { ...data, tenant_id: tenantId };
     
     const fields = Object.keys(dataWithTenant);
-    const values = Object.values(dataWithTenant);
+    const values = Object.values(dataWithTenant) as any[];
     const placeholders = fields.map(() => '?').join(', ');
 
     const sql = `INSERT INTO ${this.tableName} (${fields.join(', ')}) VALUES (${placeholders})`;
@@ -75,7 +75,7 @@ export class TenantBaseRepository<T> {
     const fields = Object.keys(safeData);
     if (fields.length === 0) return false;
 
-    const values = Object.values(safeData);
+    const values = Object.values(safeData) as any[];
     const setClause = fields.map(field => `${field} = ?`).join(', ');
 
     const sql = `UPDATE ${this.tableName} SET ${setClause} WHERE id = ? AND tenant_id = ?`;

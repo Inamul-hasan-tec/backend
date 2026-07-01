@@ -158,7 +158,7 @@ export class BookingRepository extends TenantBaseRepository<Booking> {
       // Create booking
       const dataWithTenant = { ...cleanBookingData, tenant_id: tenantId };
       const fields = Object.keys(dataWithTenant);
-      const values = Object.values(dataWithTenant);
+      const values = Object.values(dataWithTenant) as any[];
       const placeholders = fields.map(() => '?').join(', ');
 
       const bookingSql = `INSERT INTO bookings (${fields.join(', ')}) VALUES (${placeholders})`;
