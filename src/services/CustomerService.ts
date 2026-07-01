@@ -6,6 +6,7 @@
 import { CustomerRepository } from '../repositories/CustomerRepository';
 import { Customer, CreateCustomerDTO, UpdateCustomerDTO, CustomerSearchParams } from '../models/Customer';
 import { isValidEmail, isValidPhone, validateRequired } from '../utils/validation';
+import { getTenantId } from '../utils/tenantContext';
 
 export class CustomerService {
   private customerRepo: CustomerRepository;
@@ -31,7 +32,7 @@ export class CustomerService {
   /**
    * Create new customer
    */
-  async createCustomer(data: CreateCustomerDTO): Promise<number> {
+  async createCustomer(data: Omit<CreateCustomerDTO, 'tenant_id'>): Promise<number> {
     // Validate required fields
     const validation = validateRequired(data, ['name', 'phone']);
     if (!validation.valid) {
@@ -48,14 +49,15 @@ export class CustomerService {
       throw new Error('Invalid email format');
     }
 
-    // Check if phone already exists
+    // Check if phone already exists in this tenant
     const existing = await this.customerRepo.findByPhone(data.phone);
     if (existing) {
       throw new Error('Customer with this phone number already exists');
     }
 
-    // Create customer
-    return await this.customerRepo.create(data);
+    // Create customer (tenant_id is handled by TenantBaseRepository, but we must pass it if CreateCustomerDTO requires it type-wise)
+    const tenant_id = getTenantId();
+    return await this.customerRepo.create({ ...data, tenant_id } as CreateCustomerDTO);
   }
 
   /**

@@ -5,6 +5,7 @@
 
 export interface Hall {
   id: number;
+  tenant_id?: number;
   name: string;
   capacity: number;
   base_price: number;
@@ -19,6 +20,7 @@ export interface Hall {
 }
 
 export interface CreateHallDTO {
+  tenant_id?: number;
   name: string;
   capacity: number;
   base_price: number;
@@ -31,6 +33,7 @@ export interface CreateHallDTO {
 }
 
 export interface UpdateHallDTO {
+  tenant_id?: number;
   name?: string;
   capacity?: number;
   base_price?: number;

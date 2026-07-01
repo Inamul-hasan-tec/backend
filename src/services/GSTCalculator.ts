@@ -53,13 +53,49 @@ export class GSTCalculator {
     lineItems: LineItem[],
     businessStateCode: string,
     customerStateCode: string,
-    roundOffEnabled: boolean = true
+    roundOffEnabled: boolean = true,
+    invoiceDiscountAmount: number = 0
   ): GSTCalculationResult {
+    if (!Array.isArray(lineItems) || lineItems.length === 0) {
+      throw new Error('At least one invoice line item is required');
+    }
+
+    const normalizedBusinessStateCode = this.normalizeStateCode(businessStateCode);
+    const normalizedCustomerStateCode = this.normalizeStateCode(customerStateCode);
+    if (!this.isValidStateCode(normalizedBusinessStateCode)) {
+      throw new Error('Business state code is invalid');
+    }
+    if (!this.isValidStateCode(normalizedCustomerStateCode)) {
+      throw new Error('Customer state code is invalid');
+    }
+
+    lineItems.forEach((item, index) => this.validateLineItem(item, index));
+
+    if (!Number.isFinite(invoiceDiscountAmount) || invoiceDiscountAmount < 0) {
+      throw new Error('Invoice discount must be a non-negative number');
+    }
+
+    const taxableBeforeInvoiceDiscount = lineItems.reduce((sum, item) => {
+      return sum + item.quantity * item.unit_price - (item.discount_amount || 0);
+    }, 0);
+    if (invoiceDiscountAmount > taxableBeforeInvoiceDiscount) {
+      throw new Error('Invoice discount cannot exceed the taxable amount');
+    }
+
+    const discountedLineItems = this.allocateInvoiceDiscount(
+      lineItems,
+      invoiceDiscountAmount,
+      taxableBeforeInvoiceDiscount
+    );
+
     // Determine supply type
-    const supplyType = businessStateCode === customerStateCode ? 'intrastate' : 'interstate';
+    const supplyType =
+      normalizedBusinessStateCode === normalizedCustomerStateCode
+        ? 'intrastate'
+        : 'interstate';
 
     // Calculate each line item
-    const calculatedLineItems: CalculatedLineItem[] = lineItems.map((item) => {
+    const calculatedLineItems: CalculatedLineItem[] = discountedLineItems.map((item) => {
       return this.calculateLineItem(item, supplyType);
     });
 
@@ -99,6 +135,62 @@ export class GSTCalculator {
       supply_type: supplyType,
       line_items: calculatedLineItems,
     };
+  }
+
+  private static validateLineItem(item: LineItem, index: number): void {
+    const lineNumber = index + 1;
+    if (!item.description?.trim()) {
+      throw new Error(`Line ${lineNumber} description is required`);
+    }
+    if (!item.sac_hsn?.trim()) {
+      throw new Error(`Line ${lineNumber} SAC/HSN is required`);
+    }
+    if (!Number.isFinite(item.quantity) || item.quantity <= 0) {
+      throw new Error(`Line ${lineNumber} quantity must be positive`);
+    }
+    if (!Number.isFinite(item.unit_price) || item.unit_price < 0) {
+      throw new Error(`Line ${lineNumber} unit price cannot be negative`);
+    }
+    if (!this.isValidGSTRate(item.gst_rate)) {
+      throw new Error(`Line ${lineNumber} GST rate is invalid`);
+    }
+
+    const discount = item.discount_amount || 0;
+    const subtotal = item.quantity * item.unit_price;
+    if (!Number.isFinite(discount) || discount < 0) {
+      throw new Error(`Line ${lineNumber} discount cannot be negative`);
+    }
+    if (discount > subtotal) {
+      throw new Error(`Line ${lineNumber} discount cannot exceed its subtotal`);
+    }
+  }
+
+  private static allocateInvoiceDiscount(
+    lineItems: LineItem[],
+    invoiceDiscountAmount: number,
+    taxableBeforeInvoiceDiscount: number
+  ): LineItem[] {
+    if (invoiceDiscountAmount === 0) {
+      return lineItems.map((item) => ({ ...item }));
+    }
+
+    let allocated = 0;
+    return lineItems.map((item, index) => {
+      const existingDiscount = item.discount_amount || 0;
+      const lineTaxable = item.quantity * item.unit_price - existingDiscount;
+      const isLastLine = index === lineItems.length - 1;
+      const allocation = isLastLine
+        ? this.roundTo2Decimals(invoiceDiscountAmount - allocated)
+        : this.roundTo2Decimals(
+            invoiceDiscountAmount * (lineTaxable / taxableBeforeInvoiceDiscount)
+          );
+      allocated += allocation;
+
+      return {
+        ...item,
+        discount_amount: this.roundTo2Decimals(existingDiscount + allocation),
+      };
+    });
   }
 
   /**
@@ -249,8 +341,15 @@ export class GSTCalculator {
    * Validate state code
    */
   static isValidStateCode(stateCode: string): boolean {
-    const code = parseInt(stateCode);
-    return !isNaN(code) && code >= 1 && code <= 38;
+    if (!/^\d{1,2}$/.test(String(stateCode).trim())) {
+      return false;
+    }
+    const code = Number.parseInt(stateCode, 10);
+    return code >= 1 && code <= 38;
+  }
+
+  static normalizeStateCode(stateCode: string): string {
+    return String(stateCode || '').trim().padStart(2, '0');
   }
 
   /**

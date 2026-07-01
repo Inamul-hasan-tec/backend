@@ -1,0 +1,24 @@
+[Unit]
+Description=Hall Sync API
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/var/www/hallsync/backend
+EnvironmentFile=/etc/hallsync-api.env
+ExecStart=/usr/bin/node dist/server.js
+Restart=always
+RestartSec=5
+User=www-data
+Group=www-data
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/var/www/hallsync/backups
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target
+

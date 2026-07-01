@@ -1,7 +1,9 @@
 import { Request, Response } from 'express';
 import { UserService } from '../services/UserService';
+import { AuthRepository } from '../repositories/AuthRepository';
 
 const userService = new UserService();
+const authRepository = new AuthRepository();
 
 /**
  * @route   POST /api/auth/register
@@ -22,10 +24,11 @@ export const register = async (req: Request, res: Response) => {
 
     // Register user
     const result = await userService.register({
+      tenant_id: 1, // Default tenant for now, will be set by tenant middleware
       name,
       email,
       password,
-      role: role || 'staff',
+      role: role || 'staff_2',
     });
 
     res.status(201).json({
@@ -71,7 +74,11 @@ export const login = async (req: Request, res: Response) => {
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Login failed';
-    const statusCode = message.includes('Invalid') ? 401 : 500;
+    const statusCode = message.includes('Invalid')
+      ? 401
+      : message.includes('inactive')
+        ? 403
+        : 500;
     
     res.status(statusCode).json({
       success: false,
@@ -101,4 +108,37 @@ export const getCurrentUser = (req: Request, res: Response) => {
   }
 };
 
-export default { login, getCurrentUser };
+/**
+ * @route   POST /api/auth/logout
+ * @desc    Revoke all access tokens issued to the current user
+ * @access  Private
+ */
+export const logout = async (req: Request, res: Response) => {
+  try {
+    const user = req.user;
+    if (!user) {
+      return res.status(401).json({
+        success: false,
+        message: 'Unauthorized',
+      });
+    }
+
+    const revoked = await authRepository.revokeAllSessions(user.id);
+    if (!revoked) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    res.json({
+      success: true,
+      message: 'Logged out successfully',
+    });
+  } catch (err) {
+    console.error('Logout error:', err);
+    res.status(500).json({
+      success: false,
+      message: 'Server error during logout',
+    });
+  }
+};
+
+export default { login, getCurrentUser, logout };

@@ -7,6 +7,7 @@ import { RowDataPacket } from 'mysql2';
 import pool from '../config/db';
 import { SlotRepository } from '../repositories/SlotRepository';
 import { Slot, SlotWithBookingDetails, CreateSlotDTO, UpdateSlotDTO } from '../models/Slot';
+import { getTenantId } from '../utils/tenantContext';
 
 export class SlotService {
   private slotRepository: SlotRepository;
@@ -24,6 +25,7 @@ export class SlotService {
     month: number,
     hallId?: number
   ): Promise<SlotWithBookingDetails[]> {
+    const tenantId = getTenantId();
     const sql = `
       SELECT 
         s.id,
@@ -39,16 +41,17 @@ export class SlotService {
         b.total_amount,
         b.advance_amount as advance_paid
       FROM slots s
-      LEFT JOIN bookings b ON s.booking_id = b.id
-      LEFT JOIN customers c ON b.customer_id = c.id
-      LEFT JOIN packages p ON b.package_id = p.id
-      WHERE YEAR(s.slot_date) = ?
+      LEFT JOIN bookings b ON s.booking_id = b.id AND b.tenant_id = s.tenant_id
+      LEFT JOIN customers c ON b.customer_id = c.id AND c.tenant_id = s.tenant_id
+      LEFT JOIN packages p ON b.package_id = p.id AND p.tenant_id = s.tenant_id
+      WHERE s.tenant_id = ?
+        AND YEAR(s.slot_date) = ?
         AND MONTH(s.slot_date) = ?
         ${hallId ? 'AND s.hall_id = ?' : ''}
       ORDER BY s.slot_date, s.slot_type
     `;
 
-    const params: any[] = [year, month];
+    const params: any[] = [tenantId, year, month];
     if (hallId) {
       params.push(hallId);
     }
@@ -112,16 +115,18 @@ export class SlotService {
     date: string,
     slotType: 'morning' | 'afternoon' | 'night'
   ): Promise<boolean> {
+    const tenantId = getTenantId();
     const sql = `
       SELECT COUNT(*) as count
       FROM slots
       WHERE hall_id = ?
+        AND tenant_id = ?
         AND slot_date = ?
         AND slot_type = ?
         AND status = 'available'
     `;
 
-    const [rows] = await pool.execute<RowDataPacket[]>(sql, [hallId, date, slotType]);
+    const [rows] = await pool.execute<RowDataPacket[]>(sql, [hallId, tenantId, date, slotType]);
     return rows[0].count > 0;
   }
 
@@ -133,15 +138,17 @@ export class SlotService {
     date: string,
     slotType: 'morning' | 'afternoon' | 'night'
   ): Promise<Slot | null> {
+    const tenantId = getTenantId();
     const sql = `
       SELECT *
       FROM slots
       WHERE hall_id = ?
+        AND tenant_id = ?
         AND slot_date = ?
         AND slot_type = ?
     `;
 
-    const [rows] = await pool.execute<RowDataPacket[]>(sql, [hallId, date, slotType]);
+    const [rows] = await pool.execute<RowDataPacket[]>(sql, [hallId, tenantId, date, slotType]);
     return rows.length > 0 ? (rows[0] as Slot) : null;
   }
 
@@ -154,6 +161,19 @@ export class SlotService {
     month: number,
     hallId: number
   ): Promise<number> {
+    const currentTenantId = getTenantId();
+    // Get tenant_id from the hall
+    const [hallRows] = await pool.execute<RowDataPacket[]>(
+      'SELECT tenant_id FROM halls WHERE id = ? AND tenant_id = ?',
+      [hallId, currentTenantId]
+    );
+    
+    if (hallRows.length === 0 || !hallRows[0].tenant_id) {
+      throw new Error('Hall not found or tenant_id is missing');
+    }
+    
+    const tenantId = hallRows[0].tenant_id;
+
     const daysInMonth = new Date(year, month, 0).getDate();
     const slotTypes: ('morning' | 'afternoon' | 'night')[] = ['morning', 'afternoon', 'night'];
     let createdCount = 0;
@@ -168,6 +188,7 @@ export class SlotService {
         if (!existing) {
           const slotData: CreateSlotDTO = {
             hall_id: hallId,
+            tenant_id: tenantId, // Include tenant_id from hall
             slot_date: date, // Use string directly to avoid timezone conversion
             slot_type: slotType,
             status: 'available' as const
@@ -186,9 +207,11 @@ export class SlotService {
    * Generate slots for all active halls for next N months
    */
   async generateSlotsForAllHalls(months: number = 6): Promise<{ hallsProcessed: number; slotsCreated: number }> {
+    const tenantId = getTenantId();
     // Get all active halls
     const [halls] = await pool.execute<RowDataPacket[]>(
-      'SELECT id FROM halls WHERE status = "active"'
+      'SELECT id FROM halls WHERE tenant_id = ? AND status = ?',
+      [tenantId, 'active']
     );
 
     let totalSlotsCreated = 0;
@@ -221,16 +244,18 @@ export class SlotService {
     dateFrom: string,
     dateTo: string
   ): Promise<Slot[]> {
+    const tenantId = getTenantId();
     const sql = `
       SELECT *
       FROM slots
       WHERE hall_id = ?
+        AND tenant_id = ?
         AND slot_date BETWEEN ? AND ?
         AND status = 'available'
       ORDER BY slot_date, slot_type
     `;
 
-    const [rows] = await pool.execute<RowDataPacket[]>(sql, [hallId, dateFrom, dateTo]);
+    const [rows] = await pool.execute<RowDataPacket[]>(sql, [hallId, tenantId, dateFrom, dateTo]);
     return rows as Slot[];
   }
 
@@ -239,12 +264,13 @@ export class SlotService {
    * Used by admin to mark slots as unavailable
    */
   async blockSlot(slotId: number, block: boolean, notes?: string): Promise<void> {
+    const tenantId = getTenantId();
     const status = block ? 'blocked' : 'available';
     const sql = `
       UPDATE slots
       SET status = ?, notes = ?, updated_at = NOW()
-      WHERE id = ?
+      WHERE id = ? AND tenant_id = ?
     `;
-    await pool.execute(sql, [status, notes || null, slotId]);
+    await pool.execute(sql, [status, notes || null, slotId, tenantId]);
   }
 }

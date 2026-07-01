@@ -1,317 +1,99 @@
-# 🗄️ Database Setup & Overview
+# Hall Sync Database Baseline and Migration Guide
 
-**Last Updated:** 2025-10-17  
-**Database:** MySQL 8.0+  
-**Database Name:** `hall_sync`
+**Last updated:** 2026-06-21 08:20 IST
+**Database:** MySQL 8
+**Production-target database:** Aiven `defaultdb`
 
----
+## Source of Truth
 
-## 🚀 Quick Setup
+The live schema plus the `schema_migrations` table is the authoritative schema
+state. The production-target database is currently migrated through:
 
-### 1. Create Database
-```sql
-CREATE DATABASE hall_sync;
-USE hall_sync;
-```
+- `300_platform_tenant_lifecycle.sql`
+- `301_subscription_billing.sql`
+- `302_booking_payment_integrity.sql`
+- `303_full_day_slots.sql`
+- `304_invoice_integrity.sql`
+- `305_invoice_payment_allocations.sql`
+- `306_booking_payment_mode.sql`
+- `307_subscription_collations.sql`
+- `308_auth_session_revocation.sql`
+- `309_invitations_subscription_policy.sql`
+- `310_user_phone.sql`
 
-### 2. Run Schema
+`npm run production:audit` must report no missing tables/columns, invalid
+collations, duplicate payment references, or pending migrations.
+
+## File Roles
+
+| Location | Role | May be run against production? |
+| --- | --- | --- |
+| `migrations/300+` | Forward-only tracked platform migrations | Only through `npm run production:migrate` |
+| `migrations/000_create_migration_tracker.sql` | Historical tracker definition | No |
+| `migrations/001`, `002`, `101-107`, `200`, `201` | Legacy development history retained for reference | No |
+| `database/schema_v2.sql` | Historical/bootstrap reference, not live migration truth | No |
+| `backups/database/*.sql` | Portable recovery artifacts with checksum manifests | Restore only to an isolated target first |
+
+The legacy `migration_tracker` table remains in production for compatibility,
+but all current migration decisions use `schema_migrations`. Do not delete the
+legacy tracker or replay old migrations without an approved cleanup plan.
+
+## Safe Commands
+
+From `backend/`:
+
 ```bash
-mysql -u root -p hall_sync < database/schema.sql
+npm run production:audit
+npm run production:readiness
+npm run production:migrate
+npm run production:backup
+npm run production:backup:verify
+npm run production:restore:drill
 ```
 
-### 3. Seed Sample Data
+`production:migrate` is the only approved production-target migration entry
+point. It performs a pre-audit, creates a backup, runs pending additive
+migrations, and performs a production-target post-audit.
+
+The lower-level `migrate:platform` command is for disposable/non-production
+databases. It refuses production/default targets unless the guarded migration
+window explicitly enables it.
+
+## Adding a Migration
+
+1. Add the next numbered, forward-only SQL file under `migrations/`.
+2. Make it safe for existing data and idempotent where practical.
+3. Add its filename to:
+   - `scripts/run_platform_migrations.js`
+   - `scripts/audit_staging_schema.js`
+   - `scripts/production_readiness_audit.js`
+4. Add required tables/columns to the schema audit.
+5. Run backend tests/build and a non-production rehearsal when available.
+6. Use the backup-first production migration window.
+7. Record backup, audit, and acceptance evidence in canonical docs.
+
+Never edit a migration already recorded in `schema_migrations`; add a new
+numbered migration instead.
+
+## Backups and Restore
+
+Backups live outside both application repositories under
+`backups/database/`. Current backups include JSON manifests with database,
+size, table count, portability, and SHA-256 metadata.
+
+Before trusting a backup:
+
 ```bash
-mysql -u root -p hall_sync < database/seed.sql
+npm run production:backup:verify
 ```
 
-### 4. Configure Environment
-```env
-DB_HOST=localhost
-DB_USER=root
-DB_PASSWORD=your_password
-DB_NAME=hall_sync
-DB_PORT=3306
-```
-
----
-
-## 📊 Database Schema Overview
-
-### Core Tables
-
-#### 1. **customers** - Customer information
-- Primary Key: `id`
-- Unique: `phone`
-- Stores customer contact and event details
-
-#### 2. **halls** - Marriage hall information
-- Primary Key: `id`
-- Stores hall details, capacity, pricing
-
-#### 3. **packages** - Service packages
-- Primary Key: `id`
-- Stores package details and pricing
-
-#### 4. **bookings** - Event bookings
-- Primary Key: `id`
-- Foreign Keys: `customer_id`, `hall_id`, `package_id`
-- Stores booking details and status
-
-#### 5. **slots** - Hall availability slots
-- Primary Key: `id`
-- Foreign Keys: `hall_id`, `booking_id`
-- Manages hall availability by date
-
-#### 6. **payments** - Payment records
-- Primary Key: `id`
-- Foreign Key: `booking_id`
-- Tracks payment transactions
-
-#### 7. **users** - System users (future)
-- Primary Key: `id`
-- For authentication and authorization
-
----
-
-## 🔗 Relationships
-
-```
-customers (1) ──────< (many) bookings
-halls (1) ──────────< (many) bookings
-packages (1) ────────< (many) bookings
-halls (1) ──────────< (many) slots
-bookings (1) ────────< (many) payments
-bookings (1) ────────< (many) slots
-```
-
----
-
-## 📋 Table Details
-
-### customers
-| Column | Type | Constraints |
-|--------|------|-------------|
-| id | INT | PRIMARY KEY, AUTO_INCREMENT |
-| name | VARCHAR(100) | NOT NULL |
-| phone | VARCHAR(15) | UNIQUE, NOT NULL |
-| email | VARCHAR(100) | |
-| city | VARCHAR(50) | |
-| state | VARCHAR(50) | |
-| pincode | VARCHAR(10) | |
-| address | TEXT | |
-| event_type | ENUM | |
-| notes | TEXT | |
-| created_at | TIMESTAMP | DEFAULT CURRENT_TIMESTAMP |
-| updated_at | TIMESTAMP | ON UPDATE CURRENT_TIMESTAMP |
-
-### halls
-| Column | Type | Constraints |
-|--------|------|-------------|
-| id | INT | PRIMARY KEY, AUTO_INCREMENT |
-| name | VARCHAR(100) | NOT NULL |
-| capacity | INT | NOT NULL |
-| base_price | DECIMAL(10,2) | NOT NULL |
-| description | TEXT | |
-| location | VARCHAR(255) | |
-| amenities | TEXT | |
-| status | ENUM | DEFAULT 'active' |
-| created_at | TIMESTAMP | DEFAULT CURRENT_TIMESTAMP |
-| updated_at | TIMESTAMP | ON UPDATE CURRENT_TIMESTAMP |
-
-### packages
-| Column | Type | Constraints |
-|--------|------|-------------|
-| id | INT | PRIMARY KEY, AUTO_INCREMENT |
-| name | VARCHAR(100) | NOT NULL |
-| base_price | DECIMAL(10,2) | NOT NULL |
-| description | TEXT | |
-| inclusions | TEXT | |
-| status | ENUM | DEFAULT 'active' |
-| created_at | TIMESTAMP | DEFAULT CURRENT_TIMESTAMP |
-| updated_at | TIMESTAMP | ON UPDATE CURRENT_TIMESTAMP |
-
-### bookings
-| Column | Type | Constraints |
-|--------|------|-------------|
-| id | INT | PRIMARY KEY, AUTO_INCREMENT |
-| customer_id | INT | FOREIGN KEY → customers(id) |
-| hall_id | INT | FOREIGN KEY → halls(id) |
-| package_id | INT | FOREIGN KEY → packages(id) |
-| event_date | DATE | NOT NULL |
-| event_type | ENUM | |
-| guest_count | INT | |
-| status | ENUM | DEFAULT 'pending' |
-| total_amount | DECIMAL(10,2) | NOT NULL |
-| advance_amount | DECIMAL(10,2) | |
-| balance_amount | DECIMAL(10,2) | GENERATED |
-| payment_mode | ENUM | |
-| notes | TEXT | |
-| created_at | TIMESTAMP | DEFAULT CURRENT_TIMESTAMP |
-| updated_at | TIMESTAMP | ON UPDATE CURRENT_TIMESTAMP |
-
----
-
-## 🔍 Indexes
-
-### Performance Indexes
-```sql
--- Customer lookups
-INDEX idx_customer_phone ON customers(phone);
-INDEX idx_customer_city ON customers(city);
-
--- Hall searches
-INDEX idx_hall_status ON halls(status);
-INDEX idx_hall_capacity ON halls(capacity);
-
--- Booking queries
-INDEX idx_booking_date ON bookings(event_date);
-INDEX idx_booking_status ON bookings(status);
-INDEX idx_booking_customer ON bookings(customer_id);
-INDEX idx_booking_hall ON bookings(hall_id);
-
--- Slot availability
-INDEX idx_slot_date ON slots(slot_date);
-INDEX idx_slot_hall ON slots(hall_id);
-INDEX idx_slot_status ON slots(status);
-```
-
----
-
-## 📈 Views
-
-### booking_details_view
-Complete booking information with customer, hall, and package details.
-
-```sql
-CREATE VIEW booking_details_view AS
-SELECT 
-  b.*,
-  c.name as customer_name,
-  c.phone as customer_phone,
-  h.name as hall_name,
-  h.location as hall_location,
-  p.name as package_name
-FROM bookings b
-JOIN customers c ON b.customer_id = c.id
-JOIN halls h ON b.hall_id = h.id
-LEFT JOIN packages p ON b.package_id = p.id;
-```
-
----
-
-## ⚙️ Stored Procedures
-
-### sp_check_hall_availability
-Check if a hall is available on a specific date.
-
-```sql
-CALL sp_check_hall_availability(hall_id, 'YYYY-MM-DD');
-```
-
-### sp_get_dashboard_stats
-Get comprehensive dashboard statistics.
-
-```sql
-CALL sp_get_dashboard_stats();
-```
-
----
-
-## 🔔 Triggers
-
-### trg_booking_after_insert
-Automatically creates a slot when a booking is created.
-
-### trg_booking_after_update
-Updates slot status when booking status changes.
-
----
-
-## 🔄 Migrations
-
-### Current Version: 1.0
-
-**Schema File:** `database/schema.sql`  
-**Seed File:** `database/seed.sql`
-
-### Future Migrations
-- Add user authentication tables
-- Add audit logs
-- Add file attachments
-- Add notification preferences
-
----
-
-## 📊 Sample Data
-
-The seed file includes:
-- 10 customers
-- 5 halls
-- 7 packages
-- 10 bookings
-- Corresponding slots and payments
-
----
-
-## 🔧 Maintenance
-
-### Backup Database
-```bash
-mysqldump -u root -p hall_sync > backup_$(date +%Y%m%d).sql
-```
-
-### Restore Database
-```bash
-mysql -u root -p hall_sync < backup_20251017.sql
-```
-
-### Check Table Status
-```sql
-SHOW TABLE STATUS FROM hall_sync;
-```
-
-### Optimize Tables
-```sql
-OPTIMIZE TABLE customers, halls, packages, bookings, slots, payments;
-```
-
----
-
-## 🐛 Troubleshooting
-
-### Connection Issues
-```bash
-# Check MySQL is running
-sudo systemctl status mysql
-
-# Test connection
-mysql -u root -p -e "SELECT 1;"
-```
-
-### Permission Issues
-```sql
-GRANT ALL PRIVILEGES ON hall_sync.* TO 'your_user'@'localhost';
-FLUSH PRIVILEGES;
-```
-
-### Reset Database
-```bash
-mysql -u root -p -e "DROP DATABASE IF EXISTS hall_sync;"
-mysql -u root -p -e "CREATE DATABASE hall_sync;"
-mysql -u root -p hall_sync < database/schema.sql
-mysql -u root -p hall_sync < database/seed.sql
-```
-
----
-
-## 📚 Related Documentation
-
-- **Detailed Schema:** `backend/database/SCHEMA-DOCUMENTATION.md`
-- **API Reference:** `backend/docs/API-REFERENCE.md`
-- **Testing Guide:** `backend/docs/TESTING.md`
-
----
-
-**Last Updated:** 2025-10-17  
-**Schema Version:** 1.0  
-**Total Tables:** 7
+A restore drill must use a separately created empty database and explicit
+`RESTORE_DB_*` credentials. Never point restore-drill variables at `defaultdb`.
+See `docs/05-operations/BACKUP-AND-RESTORE-OPERATIONS.md` for the complete
+procedure and reconciliation requirements.
+
+## Current Constraint
+
+The production schema and backup tooling are verified. The remaining database
+operations gate is an executed restore/reconciliation drill against a separate
+empty restore-test database.

@@ -6,6 +6,10 @@
 import { Request, Response } from 'express';
 import InvoiceRepository from '../repositories/InvoiceRepository';
 import { CreateInvoiceDTO, UpdateInvoiceDTO, InvoiceFilters, RecordPaymentDTO } from '../models/Invoice';
+import InvoicePDFService from '../services/InvoicePDFService';
+import InvoiceEmailService, {
+  EmailConfigurationError,
+} from '../services/InvoiceEmailService';
 
 export class InvoiceController {
   /**
@@ -24,7 +28,7 @@ export class InvoiceController {
         search: req.query.search as string,
       };
 
-      const invoices = await InvoiceRepository.getAll(filters);
+      const invoices = await InvoiceRepository.getAllInvoices(filters);
 
       res.json({
         success: true,
@@ -75,7 +79,7 @@ export class InvoiceController {
   async getInvoiceById(req: Request, res: Response): Promise<void> {
     try {
       const { id } = req.params;
-      const invoice = await InvoiceRepository.getById(parseInt(id));
+      const invoice = await InvoiceRepository.getInvoiceById(parseInt(id));
 
       if (!invoice) {
         res.status(404).json({
@@ -137,7 +141,7 @@ export class InvoiceController {
   async getInvoicesByBooking(req: Request, res: Response): Promise<void> {
     try {
       const { bookingId } = req.params;
-      const invoices = await InvoiceRepository.getByBookingId(parseInt(bookingId));
+      const invoices = await InvoiceRepository.getAllInvoices({ booking_id: parseInt(bookingId) });
 
       res.json({
         success: true,
@@ -161,7 +165,7 @@ export class InvoiceController {
   async getInvoicesByCustomer(req: Request, res: Response): Promise<void> {
     try {
       const { customerId } = req.params;
-      const invoices = await InvoiceRepository.getByCustomerId(parseInt(customerId));
+      const invoices = await InvoiceRepository.getAllInvoices({ customer_id: parseInt(customerId) });
 
       res.json({
         success: true,
@@ -198,8 +202,8 @@ export class InvoiceController {
       // Get user ID from auth middleware
       const userId = (req as any).user?.id || 1;
 
-      const invoiceId = await InvoiceRepository.create(invoiceData, userId);
-      const invoice = await InvoiceRepository.getById(invoiceId);
+      const invoiceId = await InvoiceRepository.createInvoice(invoiceData, userId);
+      const invoice = await InvoiceRepository.getInvoiceById(invoiceId);
 
       res.status(201).json({
         success: true,
@@ -225,7 +229,7 @@ export class InvoiceController {
       const { id } = req.params;
       const updateData: UpdateInvoiceDTO = req.body;
 
-      const updated = await InvoiceRepository.update(parseInt(id), updateData);
+      const updated = await InvoiceRepository.updateInvoice(parseInt(id), updateData);
 
       if (!updated) {
         res.status(404).json({
@@ -235,7 +239,7 @@ export class InvoiceController {
         return;
       }
 
-      const invoice = await InvoiceRepository.getById(parseInt(id));
+      const invoice = await InvoiceRepository.getInvoiceById(parseInt(id));
 
       res.json({
         success: true,
@@ -269,7 +273,7 @@ export class InvoiceController {
         return;
       }
 
-      const invoice = await InvoiceRepository.getById(parseInt(id));
+      const invoice = await InvoiceRepository.getInvoiceById(parseInt(id));
 
       res.json({
         success: true,
@@ -313,7 +317,7 @@ export class InvoiceController {
         return;
       }
 
-      const invoice = await InvoiceRepository.getById(parseInt(id));
+      const invoice = await InvoiceRepository.getInvoiceById(parseInt(id));
 
       res.json({
         success: true,
@@ -337,12 +341,20 @@ export class InvoiceController {
   async recordPayment(req: Request, res: Response): Promise<void> {
     try {
       const paymentData: RecordPaymentDTO = req.body;
+      if (!paymentData.allocations && req.body.invoice_id && req.body.amount) {
+        paymentData.allocations = [
+          {
+            invoice_id: parseInt(req.body.invoice_id),
+            amount: Number(req.body.amount),
+          },
+        ];
+      }
 
       // Validate required fields
       if (!paymentData.payment_date || !paymentData.amount || !paymentData.payment_mode || !paymentData.allocations || paymentData.allocations.length === 0) {
         res.status(400).json({
           success: false,
-          message: 'Missing required fields: payment_date, amount, payment_mode, allocations',
+          message: 'Missing required fields: payment_date, amount, payment_mode, invoice allocation',
         });
         return;
       }
@@ -392,6 +404,100 @@ export class InvoiceController {
       res.status(500).json({
         success: false,
         message: 'Failed to generate invoice number',
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
+  }
+
+  /**
+   * GET /api/invoices/:id/pdf
+   * Download invoice as PDF
+   */
+  async downloadInvoicePDF(req: Request, res: Response): Promise<void> {
+    try {
+      const { id } = req.params;
+      const invoice = await InvoiceRepository.getInvoiceById(parseInt(id));
+
+      if (!invoice) {
+        res.status(404).json({
+          success: false,
+          message: 'Invoice not found',
+        });
+        return;
+      }
+
+      const pdf = await InvoicePDFService.generate(invoice);
+      const safeInvoiceNumber = invoice.invoice_number.replace(/[^a-zA-Z0-9_-]/g, '_');
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader(
+        'Content-Disposition',
+        `attachment; filename="${safeInvoiceNumber}.pdf"`
+      );
+      res.setHeader('Content-Length', pdf.length.toString());
+      res.send(pdf);
+    } catch (error) {
+      console.error('Error generating PDF:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to generate PDF',
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
+  }
+
+  /**
+   * POST /api/invoices/:id/email
+   * Email invoice to customer
+   */
+  async emailInvoice(req: Request, res: Response): Promise<void> {
+    try {
+      const { id } = req.params;
+      const invoice = await InvoiceRepository.getInvoiceById(parseInt(id));
+
+      if (!invoice) {
+        res.status(404).json({
+          success: false,
+          message: 'Invoice not found',
+        });
+        return;
+      }
+
+      if (!['issued', 'paid', 'partially_paid'].includes(invoice.status)) {
+        res.status(400).json({
+          success: false,
+          message: 'Only issued invoices can be emailed',
+        });
+        return;
+      }
+      if (!invoice.customer_email) {
+        res.status(400).json({
+          success: false,
+          message: 'Customer email address is required',
+        });
+        return;
+      }
+
+      const pdf = await InvoicePDFService.generate(invoice);
+      const emailService = new InvoiceEmailService();
+      await emailService.sendInvoice(invoice, pdf);
+      res.json({
+        success: true,
+        message: 'Invoice emailed successfully',
+        data: {
+          invoice_id: invoice.id,
+          invoice_number: invoice.invoice_number,
+          customer_email: invoice.customer_email,
+        },
+      });
+    } catch (error) {
+      console.error('Error sending email:', error);
+      const status = error instanceof EmailConfigurationError ? 503 : 500;
+      res.status(status).json({
+        success: false,
+        message:
+          error instanceof EmailConfigurationError
+            ? error.message
+            : 'Failed to send email',
         error: error instanceof Error ? error.message : 'Unknown error',
       });
     }

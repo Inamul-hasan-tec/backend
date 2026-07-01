@@ -10,26 +10,72 @@ import { testConnection, closePool } from './config/db';
 import routes from './routes';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler';
 import { requestLogger } from './middleware/logger';
+import { installStructuredConsoleBridge, logger } from './utils/logger';
+import { captureError, isEnabled as isMonitoringEnabled } from './utils/errorMonitor';
 
 // Load environment variables
 dotenv.config();
+installStructuredConsoleBridge();
 
 // Create Express app
 const app: Application = express();
 const PORT = process.env.PORT || 5000;
 const API_PREFIX = process.env.API_PREFIX || '/api';
+const trustProxyHops = Number(process.env.TRUST_PROXY_HOPS || 0);
+
+if (!Number.isInteger(trustProxyHops) || trustProxyHops < 0 || trustProxyHops > 2) {
+  throw new Error('TRUST_PROXY_HOPS must be an integer from 0 to 2');
+}
+
+if (trustProxyHops > 0) {
+  app.set('trust proxy', trustProxyHops);
+}
+const configuredOrigins = (process.env.CORS_ORIGIN || '')
+  .split(',')
+  .map(origin => origin.trim())
+  .filter(Boolean);
+const developmentOrigins = [
+  'http://localhost:8080',
+  'http://localhost:8081',
+  'http://localhost:5173',
+  'http://localhost:3000',
+];
+const allowedOrigins =
+  process.env.NODE_ENV === 'production'
+    ? configuredOrigins
+    : [...developmentOrigins, ...configuredOrigins];
+
+if (process.env.NODE_ENV === 'production' && allowedOrigins.length === 0) {
+  throw new Error('CORS_ORIGIN must be configured in production');
+}
 
 // ============================================
 // Middleware
 // ============================================
 
-// CORS configuration
-app.use(cors({
-  origin: process.env.CORS_ORIGIN || 'http://localhost:5173'||'http://localhost:8001',
+const corsOptions = {
+  origin: allowedOrigins,
   credentials: true,
-}));
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'X-Request-ID'],
+  exposedHeaders: ['X-Request-ID'],
+};
 
-// Body parser
+// CORS configuration
+app.use(cors(corsOptions));
+
+// Handle preflight requests explicitly
+app.options('*', cors(corsOptions));
+
+// Skip body parsing for multipart/form-data
+app.use((req, res, next) => {
+  if (req.headers['content-type']?.includes('multipart/form-data')) {
+    return next();
+  }
+  next();
+});
+
+// Body parsers
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
@@ -80,39 +126,27 @@ app.use(errorHandler);
 async function startServer() {
   try {
     // Test database connection
-    console.log('🔌 Testing database connection...');
+    logger.info('database_connection_check_started');
     const dbConnected = await testConnection();
     
     if (!dbConnected) {
-      console.error('❌ Failed to connect to database');
-      console.error('Please check your database configuration in .env file');
+      logger.error('database_connection_check_failed');
       process.exit(1);
     }
 
     // Start Express server
     app.listen(PORT, () => {
-      console.log('');
-      console.log('═══════════════════════════════════════════════');
-      console.log('🎉 Hall Sync Backend Server Started');
-      console.log('═══════════════════════════════════════════════');
-      console.log(`🚀 Server running on: http://localhost:${PORT}`);
-      console.log(`📡 API endpoint: http://localhost:${PORT}${API_PREFIX}`);
-      console.log(`🏥 Health check: http://localhost:${PORT}${API_PREFIX}/health`);
-      console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
-      console.log('═══════════════════════════════════════════════');
-      console.log('');
-      console.log('📋 Available Endpoints:');
-      console.log(`   • Customers:  ${API_PREFIX}/customers`);
-      console.log(`   • Halls:      ${API_PREFIX}/halls`);
-      console.log(`   • Packages:   ${API_PREFIX}/packages`);
-      console.log(`   • Bookings:   ${API_PREFIX}/bookings`);
-      console.log(`   • Dashboard:  ${API_PREFIX}/dashboard`);
-      console.log('');
-      console.log('✅ Server is ready to accept requests!');
-      console.log('');
+      logger.info('server_started', {
+        port: Number(PORT),
+        api_prefix: API_PREFIX,
+        health_path: `${API_PREFIX}/health`,
+      });
+      if (isMonitoringEnabled()) {
+        logger.info('error_monitoring_enabled', { dsn_configured: true });
+      }
     });
   } catch (error) {
-    console.error('❌ Failed to start server:', error);
+    logger.error('server_start_failed', { error });
     process.exit(1);
   }
 }
@@ -125,17 +159,15 @@ async function startServer() {
  * Handle graceful shutdown
  */
 async function gracefulShutdown(signal: string) {
-  console.log(`\n${signal} received. Starting graceful shutdown...`);
+  logger.info('graceful_shutdown_started', { signal });
   
   try {
     // Close database connections
     await closePool();
-    console.log('✅ Database connections closed');
-    
-    console.log('✅ Server shut down successfully');
+    logger.info('graceful_shutdown_completed', { signal });
     process.exit(0);
   } catch (error) {
-    console.error('❌ Error during shutdown:', error);
+    logger.error('graceful_shutdown_failed', { signal, error });
     process.exit(1);
   }
 }
@@ -146,13 +178,15 @@ process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
 // Handle uncaught exceptions
 process.on('uncaughtException', (error) => {
-  console.error('❌ Uncaught Exception:', error);
+  logger.error('uncaught_exception', { error });
+  captureError(error, { source: 'uncaughtException' });
   gracefulShutdown('UNCAUGHT_EXCEPTION');
 });
 
 // Handle unhandled promise rejections
 process.on('unhandledRejection', (reason, promise) => {
-  console.error('❌ Unhandled Rejection at:', promise, 'reason:', reason);
+  logger.error('unhandled_rejection', { reason, promise: String(promise) });
+  captureError(reason, { source: 'unhandledRejection' });
   gracefulShutdown('UNHANDLED_REJECTION');
 });
 

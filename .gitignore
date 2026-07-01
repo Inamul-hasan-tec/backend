@@ -11,6 +11,7 @@ build/
 .env
 .env.local
 .env.production
+.acceptance-credentials.local.json
 
 # Logs
 logs/
@@ -37,3 +38,11 @@ coverage/
 # Temporary files
 tmp/
 temp/
+
+# OS and editor metadata
+.DS_Store
+*.bak
+
+# Local database artifacts
+*.sql.bak
+backups/

@@ -1,14 +1,15 @@
 /**
  * Hall Repository
- * Data access layer for halls
+ * Data access layer for halls with Strict Multi-Tenancy via ALS
  */
 
 import { RowDataPacket } from 'mysql2';
-import { BaseRepository } from './BaseRepository';
+import { TenantBaseRepository } from './TenantBaseRepository';
 import { Hall, HallSearchParams } from '../models/Hall';
 import pool from '../config/db';
+import { getTenantId } from '../utils/tenantContext';
 
-export class HallRepository extends BaseRepository<Hall> {
+export class HallRepository extends TenantBaseRepository<Hall> {
   constructor() {
     super('halls');
   }
@@ -17,8 +18,9 @@ export class HallRepository extends BaseRepository<Hall> {
    * Search halls with filters
    */
   async search(params: HallSearchParams): Promise<Hall[]> {
-    let sql = `SELECT * FROM ${this.tableName} WHERE 1=1`;
-    const values: any[] = [];
+    const tenantId = getTenantId();
+    let sql = `SELECT * FROM ${this.tableName} WHERE tenant_id = ?`;
+    const values: any[] = [tenantId];
 
     if (params.name) {
       sql += ' AND name LIKE ?';
@@ -60,12 +62,13 @@ export class HallRepository extends BaseRepository<Hall> {
    * Get active halls
    */
   async getActive(): Promise<Hall[]> {
+    const tenantId = getTenantId();
     const sql = `
       SELECT * FROM ${this.tableName} 
-      WHERE status = 'active'
+      WHERE status = 'active' AND tenant_id = ?
       ORDER BY capacity ASC
     `;
-    const [rows] = await pool.execute<RowDataPacket[]>(sql);
+    const [rows] = await pool.execute<RowDataPacket[]>(sql, [tenantId]);
     return rows as Hall[];
   }
 
@@ -73,14 +76,16 @@ export class HallRepository extends BaseRepository<Hall> {
    * Check hall availability for a date
    */
   async isAvailable(hallId: number, date: string): Promise<boolean> {
+    const tenantId = getTenantId();
     const sql = `
       SELECT COUNT(*) as count 
       FROM slots 
       WHERE hall_id = ? 
       AND slot_date = ? 
       AND status = 'booked'
+      AND tenant_id = ?
     `;
-    const [rows] = await pool.execute<RowDataPacket[]>(sql, [hallId, date]);
+    const [rows] = await pool.execute<RowDataPacket[]>(sql, [hallId, date, tenantId]);
     return rows[0].count === 0;
   }
 
@@ -95,6 +100,7 @@ export class HallRepository extends BaseRepository<Hall> {
     hall: Hall;
     bookedDates: string[];
   } | null> {
+    const tenantId = getTenantId();
     const hall = await this.findById(hallId);
     if (!hall) return null;
 
@@ -104,11 +110,13 @@ export class HallRepository extends BaseRepository<Hall> {
       WHERE hall_id = ? 
       AND slot_date BETWEEN ? AND ?
       AND status = 'booked'
+      AND tenant_id = ?
     `;
     const [rows] = await pool.execute<RowDataPacket[]>(sql, [
       hallId,
       dateFrom,
       dateTo,
+      tenantId
     ]);
 
     const bookedDates = rows.map((row: any) => row.slot_date);

@@ -19,36 +19,58 @@ import invoiceRoutes from './invoiceRoutes';
 import smartBillingRoutes from './smartBillingRoutes';
 import flexibleBillingRoutes from './flexibleBillingRoutes';
 import discountTemplateRoutes from './discountTemplateRoutes';
+import tenantRoutes from './tenantRoutes';
+// import hallImageRoutes from './hallImageRoutes'; // DEPRECATED - replaced by galleryRoutes
+import userRoutes from './userRoutes';
+import settingsRoutes from './settingsRoutes';
+import galleryRoutes from './galleryRoutes';
+import platformRoutes from './platformRoutes';
 import { auth } from '../middleware/auth';
+import { tenantMiddleware } from '../middleware/tenantMiddleware';
 
 const router = Router();
 
 // Public routes
 router.use('/auth', authRoutes);
 
-// Protected routes (require authentication)
-router.use('/customers', auth, customerRoutes);
-router.use('/halls', auth, hallRoutes);
-router.use('/packages', auth, packageRoutes);
-router.use('/bookings', auth, bookingRoutes);
-router.use('/slots', auth, slotRoutes);
-router.use('/payments', auth, paymentRoutes);
-router.use('/reminders', auth, reminderRoutes);
-router.use('/dashboard', auth, dashboardRoutes);
+// Protected routes (require authentication + tenant context)
+router.use('/customers', auth, tenantMiddleware, customerRoutes);
+router.use('/halls', auth, tenantMiddleware, hallRoutes);
+router.use('/halls', auth, tenantMiddleware, galleryRoutes);
+router.use('/packages', auth, tenantMiddleware, packageRoutes);
+router.use('/bookings', auth, tenantMiddleware, bookingRoutes);
+router.use('/slots', auth, tenantMiddleware, slotRoutes);
+router.use('/payments', auth, tenantMiddleware, paymentRoutes);
+router.use('/reminders', auth, tenantMiddleware, reminderRoutes);
+router.use('/dashboard', auth, tenantMiddleware, dashboardRoutes);
 
 // GST & Invoice routes (Phase 2)
-router.use('/business-config', auth, businessConfigRoutes);
-router.use('/services', auth, serviceCatalogRoutes);
-router.use('/invoices', auth, invoiceRoutes);
+router.use('/business-config', auth, tenantMiddleware, businessConfigRoutes);
+router.use('/services', auth, tenantMiddleware, serviceCatalogRoutes);
+router.use('/invoices', auth, tenantMiddleware, invoiceRoutes);
 
 // Smart Billing routes (Phase 3)
-router.use('/smart-billing', auth, smartBillingRoutes);
+router.use('/smart-billing', auth, tenantMiddleware, smartBillingRoutes);
 
 // Flexible Billing routes (Phase 3B - Real-world features)
-router.use('/flexible-billing', auth, flexibleBillingRoutes);
+router.use('/flexible-billing', auth, tenantMiddleware, flexibleBillingRoutes);
 
 // Discount Templates routes (direct access)
-router.use('/discount-templates', auth, discountTemplateRoutes);
+router.use('/discount-templates', auth, tenantMiddleware, discountTemplateRoutes);
+
+// User management routes (Phase 2 - RBAC)
+router.use('/users', auth, tenantMiddleware, userRoutes);
+
+// Multi-Tenancy routes (Phase 4 - SaaS)
+// NOTE: tenantMiddleware removed - tenant routes handle their own tenant logic
+router.use('/tenants', auth, tenantRoutes);
+router.use('/platform', auth, platformRoutes);
+
+// Settings routes (Phase 2 - Advanced Features)
+router.use('/settings', auth, tenantMiddleware, settingsRoutes);
+
+// Gallery routes (Phase 5 - Gallery System) - Merged with hallRoutes above
+// Note: galleryRoutes are now mounted within hallRoutes
 
 // Health check endpoint (public)
 router.get('/health', (_req, res) => {

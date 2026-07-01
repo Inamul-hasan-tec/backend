@@ -5,6 +5,7 @@
 
 export interface Customer {
   id: number;
+  tenant_id?: number;
   name: string;
   phone: string;
   email?: string;
@@ -20,6 +21,7 @@ export interface Customer {
 }
 
 export interface CreateCustomerDTO {
+  tenant_id?: number;
   name: string;
   phone: string;
   email?: string;
@@ -33,6 +35,7 @@ export interface CreateCustomerDTO {
 }
 
 export interface UpdateCustomerDTO {
+  tenant_id?: number;
   name?: string;
   phone?: string;
   email?: string;

@@ -40,6 +40,8 @@ export interface BusinessConfig {
   bank_account_number: string | null;
   bank_ifsc: string | null;
   bank_branch: string | null;
+  upi_id: string | null;
+  upi_name: string | null;
   
   // Branding
   logo_url: string | null;
@@ -94,6 +96,8 @@ export interface UpdateBusinessConfigDTO {
   bank_account_number?: string | null;
   bank_ifsc?: string | null;
   bank_branch?: string | null;
+  upi_id?: string | null;
+  upi_name?: string | null;
   logo_url?: string | null;
   invoice_prefix?: string;
   receipt_prefix?: string;

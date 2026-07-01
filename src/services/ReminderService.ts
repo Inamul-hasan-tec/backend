@@ -45,12 +45,12 @@ export class ReminderService {
         'full_day' as time_slot,
         b.total_amount,
         b.advance_amount,
-        b.balance_amount,
+        (b.total_amount - b.advance_amount) as balance_amount,
         DATEDIFF(b.event_date, CURDATE()) as days_until_event
       FROM bookings b
       JOIN customers c ON b.customer_id = c.id
       JOIN halls h ON b.hall_id = h.id
-      WHERE b.balance_amount > 0
+      WHERE (b.total_amount - b.advance_amount) > 0
         AND b.status IN ('confirmed', 'pending')
         AND b.event_date >= CURDATE()
       ORDER BY b.event_date ASC
@@ -76,12 +76,12 @@ export class ReminderService {
         'full_day' as time_slot,
         b.total_amount,
         b.advance_amount,
-        b.balance_amount,
+        (b.total_amount - b.advance_amount) as balance_amount,
         DATEDIFF(b.event_date, CURDATE()) as days_until_event
       FROM bookings b
       JOIN customers c ON b.customer_id = c.id
       JOIN halls h ON b.hall_id = h.id
-      WHERE b.balance_amount > 0
+      WHERE (b.total_amount - b.advance_amount) > 0
         AND b.status IN ('confirmed', 'pending')
         AND b.event_date >= CURDATE()
         AND b.event_date <= DATE_ADD(CURDATE(), INTERVAL ? DAY)
@@ -109,7 +109,7 @@ export class ReminderService {
         'full_day' as time_slot,
         b.total_amount,
         b.advance_amount,
-        b.balance_amount,
+        (b.total_amount - b.advance_amount) as balance_amount,
         DATEDIFF(b.event_date, CURDATE()) as days_until_event
       FROM bookings b
       JOIN customers c ON b.customer_id = c.id

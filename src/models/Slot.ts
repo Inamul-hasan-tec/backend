@@ -27,6 +27,7 @@ export interface SlotWithBookingDetails extends Slot {
 
 export interface CreateSlotDTO {
   hall_id: number;
+  tenant_id: number;
   slot_date: string | Date;
   slot_type: 'morning' | 'afternoon' | 'night';
   status?: 'available' | 'booked' | 'blocked';

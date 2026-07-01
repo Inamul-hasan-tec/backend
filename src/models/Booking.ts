@@ -5,6 +5,7 @@
 
 export interface Booking {
   id: number;
+  tenant_id?: number;
   customer_id: number;
   hall_id: number;
   package_id?: number;
@@ -25,6 +26,7 @@ export interface Booking {
 }
 
 export interface CreateBookingDTO {
+  tenant_id?: number;
   customer_id: number;
   hall_id: number;
   package_id?: number;
@@ -41,6 +43,7 @@ export interface CreateBookingDTO {
 }
 
 export interface UpdateBookingDTO {
+  tenant_id?: number;
   customer_id?: number;
   hall_id?: number;
   package_id?: number;

@@ -5,6 +5,9 @@
 
 import mysql from 'mysql2/promise';
 import dotenv from 'dotenv';
+import fs from 'fs';
+import path from 'path';
+import { logger } from '../utils/logger';
 
 dotenv.config();
 
@@ -20,6 +23,18 @@ const dbConfig = {
   queueLimit: parseInt(process.env.DB_QUEUE_LIMIT || '0'),
   enableKeepAlive: true,
   keepAliveInitialDelay: 0,
+  ssl:
+    process.env.DB_SSL === 'true'
+      ? {
+          ca: fs.readFileSync(
+            path.resolve(
+              process.cwd(),
+              process.env.DB_SSL_CA_PATH || 'config/aiven-ca.pem'
+            )
+          ),
+          rejectUnauthorized: true,
+        }
+      : undefined,
 };
 
 // Create connection pool
@@ -31,13 +46,16 @@ const pool = mysql.createPool(dbConfig);
 export async function testConnection(): Promise<boolean> {
   try {
     const connection = await pool.getConnection();
-    console.log('✅ Database connected successfully');
-    console.log(`📊 Database: ${dbConfig.database}`);
-    console.log(`🔌 Host: ${dbConfig.host}:${dbConfig.port}`);
+    logger.info('database_connection_check_succeeded', {
+      database: dbConfig.database,
+      host: dbConfig.host,
+      port: dbConfig.port,
+      tls: Boolean(dbConfig.ssl),
+    });
     connection.release();
     return true;
   } catch (error) {
-    console.error('❌ Database connection failed:', error);
+    logger.error('database_connection_check_failed', { error });
     return false;
   }
 }
@@ -53,7 +71,7 @@ export async function query<T = any>(
     const [rows] = await pool.execute(sql, params);
     return rows as T;
   } catch (error) {
-    console.error('Query error:', error);
+    logger.error('database_query_failed', { error });
     throw error;
   }
 }
@@ -70,7 +88,7 @@ export async function getConnection() {
  */
 export async function closePool(): Promise<void> {
   await pool.end();
-  console.log('Database pool closed');
+  logger.info('database_pool_closed');
 }
 
 export default pool;
