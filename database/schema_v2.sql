@@ -147,6 +147,7 @@ DROP TABLE IF EXISTS `packages`;
 CREATE TABLE `packages` (
   `id` INT NOT NULL AUTO_INCREMENT,
   `tenant_id` INT NOT NULL,
+  `hall_id` INT DEFAULT NULL,
   `name` VARCHAR(100) NOT NULL,
   `base_price` DECIMAL(10,2) NOT NULL DEFAULT '0.00',
   `description` TEXT,
@@ -155,7 +156,9 @@ CREATE TABLE `packages` (
   `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   `updated_at` TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
-  CONSTRAINT `fk_packages_tenant` FOREIGN KEY (`tenant_id`) REFERENCES `tenants` (`id`) ON DELETE CASCADE
+  KEY `idx_packages_tenant_hall_status` (`tenant_id`, `hall_id`, `status`),
+  CONSTRAINT `fk_packages_tenant` FOREIGN KEY (`tenant_id`) REFERENCES `tenants` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_packages_hall` FOREIGN KEY (`hall_id`) REFERENCES `halls` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- 8. Bookings

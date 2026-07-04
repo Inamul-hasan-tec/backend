@@ -20,20 +20,30 @@ export class PackageRepository extends TenantBaseRepository<Package> {
    */
   async search(params: PackageSearchParams): Promise<Package[]> {
     const tenantId = getTenantId();
-    let sql = `SELECT * FROM ${this.tableName} WHERE tenant_id = ?`;
+    let sql = `
+      SELECT p.*, h.name AS hall_name
+      FROM ${this.tableName} p
+      LEFT JOIN halls h ON h.id = p.hall_id AND h.tenant_id = p.tenant_id
+      WHERE p.tenant_id = ?
+    `;
     const values: any[] = [tenantId];
 
     if (params.name) {
-      sql += ' AND name LIKE ?';
+      sql += ' AND p.name LIKE ?';
       values.push(`%${params.name}%`);
     }
 
+    if (params.hall_id) {
+      sql += ' AND (p.hall_id IS NULL OR p.hall_id = ?)';
+      values.push(params.hall_id);
+    }
+
     if (params.status) {
-      sql += ' AND status = ?';
+      sql += ' AND p.status = ?';
       values.push(params.status);
     }
 
-    sql += ' ORDER BY base_price ASC';
+    sql += ' ORDER BY p.hall_id IS NOT NULL DESC, p.base_price ASC';
 
     if (params.limit) {
       const validLimit = validateLimit(params.limit, 10, 100);
@@ -55,11 +65,32 @@ export class PackageRepository extends TenantBaseRepository<Package> {
   async getActive(): Promise<Package[]> {
     const tenantId = getTenantId();
     const sql = `
-      SELECT * FROM ${this.tableName} 
-      WHERE status = 'active' AND tenant_id = ?
-      ORDER BY base_price ASC
+      SELECT p.*, h.name AS hall_name
+      FROM ${this.tableName} p
+      LEFT JOIN halls h ON h.id = p.hall_id AND h.tenant_id = p.tenant_id
+      WHERE p.status = 'active' AND p.tenant_id = ?
+      ORDER BY p.hall_id IS NOT NULL DESC, p.base_price ASC
     `;
     const [rows] = await pool.execute<RowDataPacket[]>(sql, [tenantId]);
+    return rows as Package[];
+  }
+
+  /**
+   * Get active packages available for a hall.
+   * Global packages (hall_id NULL) are available for every hall.
+   */
+  async getActiveForHall(hallId: number): Promise<Package[]> {
+    const tenantId = getTenantId();
+    const sql = `
+      SELECT p.*, h.name AS hall_name
+      FROM ${this.tableName} p
+      LEFT JOIN halls h ON h.id = p.hall_id AND h.tenant_id = p.tenant_id
+      WHERE p.status = 'active'
+        AND p.tenant_id = ?
+        AND (p.hall_id IS NULL OR p.hall_id = ?)
+      ORDER BY p.hall_id IS NOT NULL DESC, p.base_price ASC
+    `;
+    const [rows] = await pool.execute<RowDataPacket[]>(sql, [tenantId, hallId]);
     return rows as Package[];
   }
 
@@ -71,9 +102,10 @@ export class PackageRepository extends TenantBaseRepository<Package> {
     const validLimit = validateLimit(limit, 5, 50);
     
     const sql = `
-      SELECT p.*, COUNT(b.id) as booking_count
+      SELECT p.*, h.name AS hall_name, COUNT(b.id) as booking_count
       FROM ${this.tableName} p
-      LEFT JOIN bookings b ON p.id = b.package_id
+      LEFT JOIN halls h ON h.id = p.hall_id AND h.tenant_id = p.tenant_id
+      LEFT JOIN bookings b ON p.id = b.package_id AND b.tenant_id = p.tenant_id
       WHERE p.status = 'active' AND p.tenant_id = ?
       GROUP BY p.id
       ORDER BY booking_count DESC

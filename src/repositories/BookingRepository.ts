@@ -230,6 +230,7 @@ export class BookingRepository extends TenantBaseRepository<Booking> {
         c.email as customer_email,
         h.name as hall_name,
         h.capacity as hall_capacity,
+        h.base_price as hall_base_price,
         p.name as package_name,
         p.base_price as package_price,
         u.name as created_by_name
@@ -257,6 +258,7 @@ export class BookingRepository extends TenantBaseRepository<Booking> {
         c.email as customer_email,
         h.name as hall_name,
         h.capacity as hall_capacity,
+        h.base_price as hall_base_price,
         p.name as package_name,
         p.base_price as package_price,
         u.name as created_by_name

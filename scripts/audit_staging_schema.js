@@ -19,6 +19,7 @@ const expectedMigrations = [
   '310_user_phone.sql',
   '311_tenant_upi_settings.sql',
   '312_tenant_schema_drift_guards.sql',
+  '313_hall_scoped_packages.sql',
 ];
 
 const productionTarget = process.env.HALL_SYNC_PRODUCTION_TARGET === 'true';
@@ -48,6 +49,7 @@ const requiredTables = [
 const requiredColumns = {
   users: ['auth_version', 'phone'],
   tenants: ['domain', 'logo_url', 'status'],
+  packages: ['hall_id'],
   bookings: ['balance_amount', 'payment_mode'],
   business_config: [
     'state_code',

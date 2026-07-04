@@ -52,7 +52,6 @@ export class BookingService {
       'hall_id',
       'event_date',
       'event_type',
-      'total_amount',
       'advance_amount',
       'payment_mode',
     ]);
@@ -80,6 +79,7 @@ export class BookingService {
       throw new Error('Hall does not have a tenant_id assigned');
     }
 
+    let packagePrice = 0;
     // Validate package if provided
     if (data.package_id) {
       const pkg = await this.packageRepo.findById(data.package_id);
@@ -89,6 +89,10 @@ export class BookingService {
       if (pkg.status !== 'active') {
         throw new Error('Package is not available');
       }
+      if (pkg.hall_id && Number(pkg.hall_id) !== Number(data.hall_id)) {
+        throw new Error('Selected package is not available for this hall');
+      }
+      packagePrice = Number(pkg.base_price || 0);
     }
 
     // Validate event date
@@ -133,25 +137,28 @@ export class BookingService {
       }
     }
 
-    // Validate amounts
-    if (!isPositiveNumber(data.total_amount)) {
-      throw new Error('Total amount must be a positive number');
+    // Server-authoritative pricing:
+    // hall base rent + selected package/service add-on price.
+    const totalAmount = Number(hall.base_price || 0) + packagePrice;
+    if (!isPositiveNumber(totalAmount)) {
+      throw new Error('Booking total must be a positive number');
     }
     if (data.advance_amount < 0) {
       throw new Error('Advance amount cannot be negative');
     }
-    if (data.advance_amount > data.total_amount) {
+    if (data.advance_amount > totalAmount) {
       throw new Error('Advance amount cannot exceed total amount');
     }
 
     // Calculate balance
-    const balance_amount = data.total_amount - data.advance_amount;
+    const balance_amount = totalAmount - data.advance_amount;
 
     // Create booking with tenant_id from hall
     const bookingData = {
       ...data,
       tenant_id: hall.tenant_id, // Include tenant_id from hall
       event_date: eventDate as any,
+      total_amount: totalAmount,
       balance_amount,
       status: 'confirmed' as const, // Auto-confirm bookings
     };
@@ -198,6 +205,7 @@ export class BookingService {
     }
 
     const packageId = data.package_id ?? existing.package_id;
+    let packagePrice = 0;
     if (packageId) {
       const pkg = await this.packageRepo.findById(packageId);
       if (!pkg) {
@@ -206,6 +214,10 @@ export class BookingService {
       if (pkg.status !== 'active') {
         throw new Error('Package is not available');
       }
+      if (pkg.hall_id && Number(pkg.hall_id) !== Number(hallId)) {
+        throw new Error('Selected package is not available for this hall');
+      }
+      packagePrice = Number(pkg.base_price || 0);
     }
 
     const eventDate = normalizeBookingDate(data.event_date ?? existing.event_date);
@@ -223,7 +235,7 @@ export class BookingService {
       throw new Error('Invalid time slot');
     }
 
-    const total = Number(data.total_amount ?? existing.total_amount);
+    const total = Number(hall.base_price || 0) + packagePrice;
     const advance = Number(data.advance_amount ?? existing.advance_amount);
     const balanceAmount = validateBookingAmounts(total, advance);
 
@@ -232,6 +244,7 @@ export class BookingService {
       {
         ...data,
         event_date: eventDate as any,
+        total_amount: total,
         balance_amount: balanceAmount,
       },
       { hallId, eventDate, timeSlot }

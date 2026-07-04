@@ -65,6 +65,7 @@ export interface BookingDetails extends Booking {
   customer_email?: string;
   hall_name: string;
   hall_capacity: number;
+  hall_base_price?: number;
   hall_location?: string;
   package_name?: string;
   package_price?: number;
