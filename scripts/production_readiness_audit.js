@@ -156,6 +156,8 @@ async function main() {
          SELECT '308_auth_session_revocation.sql'
          UNION ALL SELECT '309_invitations_subscription_policy.sql'
          UNION ALL SELECT '310_user_phone.sql'
+         UNION ALL SELECT '311_tenant_upi_settings.sql'
+         UNION ALL SELECT '312_tenant_schema_drift_guards.sql'
        ) expected
        LEFT JOIN schema_migrations sm ON sm.migration_name = expected.migration_name
        WHERE sm.migration_name IS NULL`

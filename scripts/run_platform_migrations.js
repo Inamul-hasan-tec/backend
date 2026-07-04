@@ -17,6 +17,8 @@ const migrationFiles = [
   '308_auth_session_revocation.sql',
   '309_invitations_subscription_policy.sql',
   '310_user_phone.sql',
+  '311_tenant_upi_settings.sql',
+  '312_tenant_schema_drift_guards.sql',
 ];
 
 async function run() {

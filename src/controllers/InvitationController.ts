@@ -7,8 +7,25 @@ import AuditRepository from '../repositories/AuditRepository';
 const emailService = new EmailService();
 
 function frontendUrl(): string {
-  const configured = process.env.FRONTEND_URL || String(process.env.CORS_ORIGIN || '').split(',')[0];
-  return configured.replace(/\/$/, '') || 'http://localhost:8080';
+  const configured =
+    process.env.PUBLIC_APP_URL ||
+    process.env.FRONTEND_URL ||
+    String(process.env.CORS_ORIGIN || '').split(',')[0];
+  const normalized = configured.trim().replace(/\/$/, '');
+
+  if (!normalized) return 'http://localhost:8080';
+
+  try {
+    const url = new URL(normalized);
+    if (url.hostname === 'hallsync.in') {
+      url.hostname = 'app.hallsync.in';
+      return url.toString().replace(/\/$/, '');
+    }
+  } catch {
+    return normalized;
+  }
+
+  return normalized;
 }
 
 function responseForInvitation(invitation: { token: string; email: string; name: string; role: InvitationRole; expiresInHours: number; id: number }) {

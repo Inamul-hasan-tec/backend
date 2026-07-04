@@ -46,6 +46,16 @@ interface UserInvitationEmailData {
   expiresInHours: number;
 }
 
+function senderAddress(): string {
+  const configured = process.env.SMTP_FROM?.trim();
+  if (configured) {
+    return configured.includes('<') ? configured : `"Hall Sync" <${configured}>`;
+  }
+
+  const user = process.env.SMTP_USER?.trim();
+  return user ? `"Hall Sync" <${user}>` : '"Hall Sync" <noreply@hallsync.com>';
+}
+
 export class EmailService {
   private transporter: nodemailer.Transporter;
 
@@ -69,7 +79,7 @@ export class EmailService {
     if (process.env.SMTP_ENABLED !== 'true') return false;
     if (!process.env.SMTP_FROM) throw new Error('SMTP_FROM is required for invitation email');
     await this.transporter.sendMail({
-      from: `"Hall Sync" <${process.env.SMTP_FROM}>`,
+      from: senderAddress(),
       to: data.to,
       subject: 'Set up your Hall Sync account',
       html: `
@@ -113,7 +123,7 @@ export class EmailService {
       const dueDateText = format(dueDate, 'MMMM dd, yyyy');
 
       const mailOptions = {
-        from: `"Hall Sync" <${process.env.SMTP_FROM || process.env.SMTP_USER || 'noreply@hallsync.com'}>`,
+        from: senderAddress(),
         to: data.customer_email,
         subject: `Booking Confirmed - ${data.hall_name} - ${eventDate}`,
         html: this.getBookingConfirmationTemplate(data, timeSlotText, eventDate, dueDateText),
@@ -149,7 +159,7 @@ export class EmailService {
       const eventDate = format(new Date(data.event_date), 'MMMM dd, yyyy');
 
       const mailOptions = {
-        from: `"Hall Sync" <${process.env.SMTP_FROM || process.env.SMTP_USER || 'noreply@hallsync.com'}>`,
+        from: senderAddress(),
         to: data.customer_email,
         subject: `Payment Reminder - Balance Due ₹${data.balance_amount.toLocaleString('en-IN')}`,
         html: this.getPaymentReminderTemplate(data, timeSlotText, eventDate),

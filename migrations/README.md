@@ -31,6 +31,7 @@ Current platform migrations:
 - `309_invitations_subscription_policy.sql`
 - `310_user_phone.sql`
 - `311_tenant_upi_settings.sql`
+- `312_tenant_schema_drift_guards.sql`
 
 For the distinction between tracked migrations, legacy migration history,
 `schema_v2.sql`, backups, and restore drills, read `../docs/DATABASE.md`.

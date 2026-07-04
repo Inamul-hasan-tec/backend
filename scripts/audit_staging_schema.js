@@ -17,6 +17,8 @@ const expectedMigrations = [
   '308_auth_session_revocation.sql',
   '309_invitations_subscription_policy.sql',
   '310_user_phone.sql',
+  '311_tenant_upi_settings.sql',
+  '312_tenant_schema_drift_guards.sql',
 ];
 
 const productionTarget = process.env.HALL_SYNC_PRODUCTION_TARGET === 'true';
@@ -38,13 +40,14 @@ const requiredTables = [
   'subscription_plans',
   'subscription_orders',
   'subscription_payments',
+  'tenant_settings',
   'invoice_line_items',
   'invoice_payment_allocations',
 ];
 
 const requiredColumns = {
   users: ['auth_version', 'phone'],
-  tenants: ['status'],
+  tenants: ['domain', 'logo_url', 'status'],
   bookings: ['balance_amount', 'payment_mode'],
   business_config: [
     'state_code',
@@ -53,6 +56,8 @@ const requiredColumns = {
     'business_hours',
     'primary_color',
     'secondary_color',
+    'upi_id',
+    'upi_name',
   ],
   slots: ['slot_type'],
   invoices: [
