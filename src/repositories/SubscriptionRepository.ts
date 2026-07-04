@@ -260,6 +260,10 @@ export class SubscriptionRepository {
         ]
       );
       await connection.commit();
+      return {
+        tenantId: Number(payment.tenant_id),
+        subscriptionId: Number(payment.subscription_id),
+      };
     } catch (error) {
       await connection.rollback();
       throw error;

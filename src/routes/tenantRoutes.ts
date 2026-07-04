@@ -66,6 +66,26 @@ router.post('/:id/owner-invitations/:invitationId/resend',
   InvitationController.resendOwnerInvitation.bind(InvitationController)
 );
 
+router.get('/:id/halls',
+  requireSuperAdmin(),
+  TenantController.getHalls
+);
+
+router.get('/:id/slots',
+  requireSuperAdmin(),
+  TenantController.getSlots
+);
+
+router.post('/:id/slots/generate',
+  requireSuperAdmin(),
+  TenantController.generateSlots
+);
+
+router.post('/:id/slots/:slotId/block',
+  requireSuperAdmin(),
+  TenantController.blockSlot
+);
+
 router.get('/:id', 
   requireSuperAdmin(),
   TenantController.getById

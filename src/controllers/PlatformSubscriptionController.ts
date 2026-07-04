@@ -1,6 +1,9 @@
 import { Request, Response } from 'express';
 import SubscriptionRepository from '../repositories/SubscriptionRepository';
 import cloudinaryService from '../services/CloudinaryService';
+import { SlotService } from '../services/SlotService';
+
+const slotService = new SlotService();
 
 export class PlatformSubscriptionController {
   async listPending(_req: Request, res: Response): Promise<void> {
@@ -19,11 +22,18 @@ export class PlatformSubscriptionController {
         res.status(401).json({ success: false, error: 'Unauthorized' });
         return;
       }
-      await SubscriptionRepository.approvePayment(
+      const approval = await SubscriptionRepository.approvePayment(
         Number(req.params.paymentId),
         req.user.id
       );
-      res.json({ success: true, message: 'Subscription payment approved' });
+      const slotGeneration = approval?.tenantId
+        ? await slotService.generateSlotsForTenantUntilSubscriptionEnd(approval.tenantId)
+        : null;
+      res.json({
+        success: true,
+        message: 'Subscription payment approved',
+        data: { slot_generation: slotGeneration },
+      });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Approval failed';
       res.status(400).json({ success: false, error: message });

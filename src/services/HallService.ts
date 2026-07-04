@@ -6,12 +6,16 @@
 import { HallRepository } from '../repositories/HallRepository';
 import { Hall, CreateHallDTO, UpdateHallDTO, HallSearchParams } from '../models/Hall';
 import { validateRequired, isPositiveNumber } from '../utils/validation';
+import { getTenantId } from '../utils/tenantContext';
+import { SlotService } from './SlotService';
 
 export class HallService {
   private hallRepo: HallRepository;
+  private slotService: SlotService;
 
   constructor() {
     this.hallRepo = new HallRepository();
+    this.slotService = new SlotService();
   }
 
   /**
@@ -48,7 +52,14 @@ export class HallService {
       throw new Error('Base price must be a positive number');
     }
 
-    return await this.hallRepo.create(data);
+    const hallId = await this.hallRepo.create(data);
+    const tenantId = getTenantId();
+
+    // New halls should immediately receive their subscription-backed inventory.
+    // This is idempotent and never overwrites booked/blocked slots.
+    await this.slotService.generateSlotsForHallUntilSubscriptionEnd(tenantId, hallId);
+
+    return hallId;
   }
 
   /**
