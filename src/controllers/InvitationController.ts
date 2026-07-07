@@ -15,16 +15,6 @@ function frontendUrl(): string {
 
   if (!normalized) return 'http://localhost:8080';
 
-  try {
-    const url = new URL(normalized);
-    if (url.hostname === 'hallsync.in') {
-      url.hostname = 'app.hallsync.in';
-      return url.toString().replace(/\/$/, '');
-    }
-  } catch {
-    return normalized;
-  }
-
   return normalized;
 }
 
