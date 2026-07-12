@@ -6,6 +6,7 @@
 import pool from '../config/db';
 import { RowDataPacket } from 'mysql2';
 import { EmailService } from './EmailService';
+import { getTenantId } from '../utils/tenantContext';
 
 interface BookingWithBalance {
   id: number;
@@ -33,6 +34,7 @@ export class ReminderService {
    * Get all bookings with pending balance
    */
   async getPendingBalanceBookings(): Promise<BookingWithBalance[]> {
+    const tenantId = getTenantId();
     const sql = `
       SELECT 
         b.id,
@@ -42,21 +44,22 @@ export class ReminderService {
         c.phone as customer_phone,
         h.name as hall_name,
         b.event_date,
-        'full_day' as time_slot,
+        b.time_slot,
         b.total_amount,
         b.advance_amount,
         (b.total_amount - b.advance_amount) as balance_amount,
         DATEDIFF(b.event_date, CURDATE()) as days_until_event
       FROM bookings b
-      JOIN customers c ON b.customer_id = c.id
-      JOIN halls h ON b.hall_id = h.id
+      JOIN customers c ON b.customer_id = c.id AND c.tenant_id = b.tenant_id
+      JOIN halls h ON b.hall_id = h.id AND h.tenant_id = b.tenant_id
       WHERE (b.total_amount - b.advance_amount) > 0
+        AND b.tenant_id = ?
         AND b.status IN ('confirmed', 'pending')
         AND b.event_date >= CURDATE()
       ORDER BY b.event_date ASC
     `;
 
-    const [rows] = await pool.execute<RowDataPacket[]>(sql);
+    const [rows] = await pool.execute<RowDataPacket[]>(sql, [tenantId]);
     return rows as BookingWithBalance[];
   }
 
@@ -64,6 +67,7 @@ export class ReminderService {
    * Get bookings with upcoming events and pending balance
    */
   async getUpcomingReminders(days: number = 7): Promise<BookingWithBalance[]> {
+    const tenantId = getTenantId();
     const sql = `
       SELECT 
         b.id,
@@ -73,22 +77,23 @@ export class ReminderService {
         c.phone as customer_phone,
         h.name as hall_name,
         b.event_date,
-        'full_day' as time_slot,
+        b.time_slot,
         b.total_amount,
         b.advance_amount,
         (b.total_amount - b.advance_amount) as balance_amount,
         DATEDIFF(b.event_date, CURDATE()) as days_until_event
       FROM bookings b
-      JOIN customers c ON b.customer_id = c.id
-      JOIN halls h ON b.hall_id = h.id
+      JOIN customers c ON b.customer_id = c.id AND c.tenant_id = b.tenant_id
+      JOIN halls h ON b.hall_id = h.id AND h.tenant_id = b.tenant_id
       WHERE (b.total_amount - b.advance_amount) > 0
+        AND b.tenant_id = ?
         AND b.status IN ('confirmed', 'pending')
         AND b.event_date >= CURDATE()
         AND b.event_date <= DATE_ADD(CURDATE(), INTERVAL ? DAY)
       ORDER BY b.event_date ASC
     `;
 
-    const [rows] = await pool.execute<RowDataPacket[]>(sql, [days]);
+    const [rows] = await pool.execute<RowDataPacket[]>(sql, [tenantId, days]);
     return rows as BookingWithBalance[];
   }
 
@@ -96,6 +101,7 @@ export class ReminderService {
    * Send payment reminder for a specific booking
    */
   async sendPaymentReminder(bookingId: number): Promise<void> {
+    const tenantId = getTenantId();
     // Get booking details
     const sql = `
       SELECT 
@@ -106,18 +112,18 @@ export class ReminderService {
         c.phone as customer_phone,
         h.name as hall_name,
         b.event_date,
-        'full_day' as time_slot,
+        b.time_slot,
         b.total_amount,
         b.advance_amount,
         (b.total_amount - b.advance_amount) as balance_amount,
         DATEDIFF(b.event_date, CURDATE()) as days_until_event
       FROM bookings b
-      JOIN customers c ON b.customer_id = c.id
-      JOIN halls h ON b.hall_id = h.id
-      WHERE b.id = ?
+      JOIN customers c ON b.customer_id = c.id AND c.tenant_id = b.tenant_id
+      JOIN halls h ON b.hall_id = h.id AND h.tenant_id = b.tenant_id
+      WHERE b.id = ? AND b.tenant_id = ?
     `;
 
-    const [rows] = await pool.execute<RowDataPacket[]>(sql, [bookingId]);
+    const [rows] = await pool.execute<RowDataPacket[]>(sql, [bookingId, tenantId]);
 
     if (rows.length === 0) {
       throw new Error('Booking not found');

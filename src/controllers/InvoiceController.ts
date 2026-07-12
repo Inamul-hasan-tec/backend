@@ -212,10 +212,33 @@ export class InvoiceController {
       });
     } catch (error) {
       console.error('Error creating invoice:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      if (errorMessage === 'Business configuration not found') {
+        res.status(409).json({
+          success: false,
+          message: 'Invoice setup incomplete. Please complete the business profile before creating invoices.',
+          error: errorMessage,
+          setup_required: true,
+          missing: ['business_profile'],
+        });
+        return;
+      }
+
+      if (errorMessage === 'Business GST state code must be configured before creating invoices') {
+        res.status(409).json({
+          success: false,
+          message: 'Invoice setup incomplete. Please configure the business GST state code before creating invoices.',
+          error: errorMessage,
+          setup_required: true,
+          missing: ['state_code'],
+        });
+        return;
+      }
+
       res.status(500).json({
         success: false,
         message: 'Failed to create invoice',
-        error: error instanceof Error ? error.message : 'Unknown error',
+        error: errorMessage,
       });
     }
   }

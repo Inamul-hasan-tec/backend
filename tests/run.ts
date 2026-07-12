@@ -22,6 +22,7 @@ import { testAuthSessionPolicy } from './auth-session-policy.test';
 import { testLoggerRedaction } from './logger-redaction.test';
 import { testErrorMonitor } from './error-monitor.test';
 import { testProofPrivacy, testProofAuthorizationMiddleware } from './proof-privacy.test';
+import { testReminderQueriesAreTenantScoped } from './tenant-scope-regression.test';
 
 async function run() {
   testRolePermissions();
@@ -43,6 +44,7 @@ async function run() {
   testErrorMonitor();
   testProofPrivacy();
   await testProofAuthorizationMiddleware();
+  testReminderQueriesAreTenantScoped();
   console.log('Hall Sync reliability tests passed');
 }
 

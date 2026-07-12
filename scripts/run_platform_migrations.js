@@ -20,6 +20,7 @@ const migrationFiles = [
   '311_tenant_upi_settings.sql',
   '312_tenant_schema_drift_guards.sql',
   '313_hall_scoped_packages.sql',
+  '314_discount_template_tenant_scope.sql',
 ];
 
 async function run() {

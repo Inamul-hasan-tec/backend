@@ -235,9 +235,9 @@ export class BookingRepository extends TenantBaseRepository<Booking> {
         p.base_price as package_price,
         u.name as created_by_name
       FROM bookings b
-      LEFT JOIN customers c ON b.customer_id = c.id
-      LEFT JOIN halls h ON b.hall_id = h.id
-      LEFT JOIN packages p ON b.package_id = p.id
+      LEFT JOIN customers c ON b.customer_id = c.id AND c.tenant_id = b.tenant_id
+      LEFT JOIN halls h ON b.hall_id = h.id AND h.tenant_id = b.tenant_id
+      LEFT JOIN packages p ON b.package_id = p.id AND p.tenant_id = b.tenant_id
       LEFT JOIN users u ON b.created_by = u.id
       WHERE b.id = ? AND b.tenant_id = ?
     `;
@@ -263,9 +263,9 @@ export class BookingRepository extends TenantBaseRepository<Booking> {
         p.base_price as package_price,
         u.name as created_by_name
       FROM bookings b
-      LEFT JOIN customers c ON b.customer_id = c.id
-      LEFT JOIN halls h ON b.hall_id = h.id
-      LEFT JOIN packages p ON b.package_id = p.id
+      LEFT JOIN customers c ON b.customer_id = c.id AND c.tenant_id = b.tenant_id
+      LEFT JOIN halls h ON b.hall_id = h.id AND h.tenant_id = b.tenant_id
+      LEFT JOIN packages p ON b.package_id = p.id AND p.tenant_id = b.tenant_id
       LEFT JOIN users u ON b.created_by = u.id
       WHERE b.tenant_id = ?
     `;
@@ -328,8 +328,8 @@ export class BookingRepository extends TenantBaseRepository<Booking> {
         h.name as hall_name,
         h.capacity as hall_capacity
       FROM bookings b
-      LEFT JOIN customers c ON b.customer_id = c.id
-      LEFT JOIN halls h ON b.hall_id = h.id
+      LEFT JOIN customers c ON b.customer_id = c.id AND c.tenant_id = b.tenant_id
+      LEFT JOIN halls h ON b.hall_id = h.id AND h.tenant_id = b.tenant_id
       WHERE b.tenant_id = ? AND b.event_date >= CURDATE()
       AND b.status IN ('pending', 'confirmed')
       ORDER BY b.event_date ASC
@@ -351,8 +351,8 @@ export class BookingRepository extends TenantBaseRepository<Booking> {
         c.phone as customer_phone,
         h.name as hall_name
       FROM bookings b
-      LEFT JOIN customers c ON b.customer_id = c.id
-      LEFT JOIN halls h ON b.hall_id = h.id
+      LEFT JOIN customers c ON b.customer_id = c.id AND c.tenant_id = b.tenant_id
+      LEFT JOIN halls h ON b.hall_id = h.id AND h.tenant_id = b.tenant_id
       WHERE b.tenant_id = ? AND b.event_date = CURDATE()
       ORDER BY b.created_at DESC
     `;
@@ -379,8 +379,8 @@ export class BookingRepository extends TenantBaseRepository<Booking> {
       }
 
       // Update booking status
-      const bookingSql = `UPDATE bookings SET status = 'cancelled' WHERE id = ?`;
-      await connection.execute(bookingSql, [id]);
+      const bookingSql = `UPDATE bookings SET status = 'cancelled' WHERE id = ? AND tenant_id = ?`;
+      await connection.execute(bookingSql, [id, tenantId]);
 
       // Release slot
       const slotSql = `
