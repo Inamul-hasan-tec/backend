@@ -14,7 +14,7 @@ export class SettingsRepository {
   async getUserById(userId: number): Promise<any> {
     const tenantId = getTenantId();
     const [rows] = await pool.query<RowDataPacket[]>(
-      `SELECT u.id, u.name, u.email, u.phone, u.last_active, ut.role, ut.tenant_id,
+      `SELECT u.id, u.name, u.email, u.phone, NULL AS last_active, ut.role, ut.tenant_id,
               u.is_super_admin, u.status as is_active, u.created_at
        FROM users u
        LEFT JOIN user_tenants ut ON u.id = ut.user_id AND ut.is_active = true
