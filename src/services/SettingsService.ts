@@ -4,6 +4,9 @@ import SubscriptionRepository from '../repositories/SubscriptionRepository';
 import bcrypt from 'bcryptjs';
 import { getTenantId } from '../utils/tenantContext';
 import { logger } from '../utils/logger';
+import fs from 'fs/promises';
+import path from 'path';
+import crypto from 'crypto';
 
 interface UpdateProfileData {
   name?: string;
@@ -12,21 +15,38 @@ interface UpdateProfileData {
 }
 
 interface UpdateBusinessProfileData {
-  business_name?: string;
-  email?: string;
-  phone?: string;
-  website?: string;
-  address?: string;
-  city?: string;
-  state?: string;
-  state_code?: string;
-  pincode?: string;
-  gst_number?: string;
-  description?: string;
-  business_hours?: string;
-  primary_color?: string;
-  secondary_color?: string;
+  business_name?: string | null;
+  subdomain?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  website?: string | null;
+  address?: string | null;
+  city?: string | null;
+  state?: string | null;
+  state_code?: string | null;
+  pincode?: string | null;
+  gst_number?: string | null;
+  upi_id?: string | null;
+  upi_name?: string | null;
+  description?: string | null;
+  business_hours?: string | null;
+  primary_color?: string | null;
+  secondary_color?: string | null;
 }
+
+const allowedLogoMimeTypes = new Set([
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+  'image/svg+xml',
+]);
+
+const logoExtensionByMimeType: Record<string, string> = {
+  'image/jpeg': 'jpg',
+  'image/png': 'png',
+  'image/webp': 'webp',
+  'image/svg+xml': 'svg',
+};
 
 interface AddTeamMemberData {
   name: string;
@@ -95,30 +115,56 @@ export class SettingsService {
     const tenantId = getTenantId();
     const existing = await this.settingsRepository.getBusinessProfile(tenantId);
     if (!existing) {
-      return await this.settingsRepository.createBusinessProfile(tenantId, {
-        business_name: data.business_name || '',
-        email: data.email || '',
-        phone: data.phone || '',
-        address: data.address || '',
-        city: data.city || '',
-        state: data.state || '',
-        state_code: data.state_code || '',
-        pincode: data.pincode || '',
-      });
+      return await this.settingsRepository.createBusinessProfile(tenantId, data);
     }
     return await this.settingsRepository.updateBusinessProfile(tenantId, data);
   }
 
   async uploadBusinessLogo(file: Express.Multer.File) {
     const tenantId = getTenantId();
-    // Upload to Cloudinary
-    const folder = this.cloudinaryService.getTenantFolder('logos');
-    const logoUrl = await this.cloudinaryService.uploadFromBuffer(file, folder);
+
+    if (!allowedLogoMimeTypes.has(file.mimetype)) {
+      throw new Error('Unsupported logo format. Please upload JPG, PNG, WebP, or SVG.');
+    }
+
+    let logoUrl: string;
+    if (this.cloudinaryService.isConfigured()) {
+      const folder = this.cloudinaryService.getTenantFolder('logos');
+      logoUrl = await this.cloudinaryService.uploadFromBuffer(file, folder);
+    } else {
+      logoUrl = await this.saveBusinessLogoLocally(tenantId, file);
+    }
     
     // Update business profile with logo URL
     await this.settingsRepository.updateBusinessProfile(tenantId, { logo_url: logoUrl });
     
     return logoUrl;
+  }
+
+  private async saveBusinessLogoLocally(
+    tenantId: number,
+    file: Express.Multer.File
+  ): Promise<string> {
+    const uploadRoot = process.env.LOCAL_UPLOAD_ROOT || path.join(process.cwd(), 'uploads');
+    const relativeFolder = path.join('business-logos', `tenant-${tenantId}`);
+    const absoluteFolder = path.join(uploadRoot, relativeFolder);
+    await fs.mkdir(absoluteFolder, { recursive: true });
+
+    const extension = logoExtensionByMimeType[file.mimetype] || 'bin';
+    const fileName = `${Date.now()}-${crypto.randomBytes(8).toString('hex')}.${extension}`;
+    const absolutePath = path.join(absoluteFolder, fileName);
+    await fs.writeFile(absolutePath, file.buffer);
+
+    const publicBaseUrl = (process.env.PUBLIC_API_BASE_URL || process.env.API_BASE_URL || '').replace(/\/$/, '');
+    const relativeUrl = `/uploads/${relativeFolder.split(path.sep).join('/')}/${fileName}`;
+
+    logger.info('business_logo_stored_locally', {
+      tenant_id: tenantId,
+      storage: 'local',
+      mime_type: file.mimetype,
+    });
+
+    return publicBaseUrl ? `${publicBaseUrl}${relativeUrl}` : relativeUrl;
   }
 
   // ============================================

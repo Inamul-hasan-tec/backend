@@ -14,7 +14,8 @@ export class SettingsRepository {
   async getUserById(userId: number): Promise<any> {
     const tenantId = getTenantId();
     const [rows] = await pool.query<RowDataPacket[]>(
-      `SELECT u.id, u.name, u.email, ut.role, ut.tenant_id, u.is_super_admin, u.status as is_active, u.created_at 
+      `SELECT u.id, u.name, u.email, u.phone, u.last_active, ut.role, ut.tenant_id,
+              u.is_super_admin, u.status as is_active, u.created_at
        FROM users u
        LEFT JOIN user_tenants ut ON u.id = ut.user_id AND ut.is_active = true
        WHERE u.id = ? AND ut.tenant_id = ?
@@ -137,9 +138,10 @@ export class SettingsRepository {
   async getBusinessProfile(tenantId_ignored: number): Promise<any> {
     const tenantId = getTenantId();
     const [rows] = await pool.query<RowDataPacket[]>(
-      `SELECT business_config.*, gstin AS gst_number
+      `SELECT business_config.*, gstin AS gst_number, tenants.domain AS subdomain
        FROM business_config
-       WHERE tenant_id = ?`,
+       JOIN tenants ON tenants.id = business_config.tenant_id
+       WHERE business_config.tenant_id = ?`,
       [tenantId]
     );
     return rows[0] || null;
@@ -147,22 +149,38 @@ export class SettingsRepository {
 
   async createBusinessProfile(tenantId_ignored: number, data: any): Promise<any> {
     const tenantId = getTenantId();
+
+    if (data.subdomain !== undefined) {
+      await this.updateTenantSubdomain(tenantId, data.subdomain);
+    }
+
+    const insertableFields = [
+      'business_name', 'email', 'phone', 'website', 'address', 'city', 'state',
+      'state_code', 'pincode', 'gst_number', 'description', 'business_hours',
+      'logo_url', 'primary_color', 'secondary_color', 'upi_id', 'upi_name'
+    ];
+    const columns = ['tenant_id'];
+    const placeholders = ['?'];
+    const values: any[] = [tenantId];
+
+    for (const field of insertableFields) {
+      if (data[field] !== undefined) {
+        columns.push(field === 'gst_number' ? 'gstin' : field);
+        placeholders.push('?');
+        values.push(data[field]);
+      }
+    }
+
+    if (!columns.includes('business_name')) {
+      columns.push('business_name');
+      placeholders.push('?');
+      values.push('');
+    }
+
     await pool.query<ResultSetHeader>(
-      `INSERT INTO business_config 
-       (tenant_id, business_name, email, phone, address, city, state, state_code,
-        pincode, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
-      [
-        tenantId,
-        data.business_name,
-        data.email,
-        data.phone,
-        data.address,
-        data.city,
-        data.state,
-        data.state_code,
-        data.pincode,
-      ]
+      `INSERT INTO business_config (${columns.join(', ')}, created_at, updated_at)
+       VALUES (${placeholders.join(', ')}, NOW(), NOW())`,
+      values
     );
     return await this.getBusinessProfile(tenantId);
   }
@@ -177,6 +195,10 @@ export class SettingsRepository {
       'state_code', 'pincode', 'gst_number', 'description', 'business_hours', 'logo_url',
       'primary_color', 'secondary_color', 'upi_id', 'upi_name'
     ];
+
+    if (data.subdomain !== undefined) {
+      await this.updateTenantSubdomain(tenantId, data.subdomain);
+    }
 
     for (const field of allowedFields) {
       if (data[field] !== undefined) {
@@ -197,6 +219,27 @@ export class SettingsRepository {
     );
 
     return await this.getBusinessProfile(tenantId);
+  }
+
+  private async updateTenantSubdomain(tenantId: number, subdomain: string | null): Promise<void> {
+    const normalized = typeof subdomain === 'string' ? subdomain.trim().toLowerCase() : null;
+    const nextDomain = normalized || null;
+
+    if (nextDomain) {
+      const [existing] = await pool.query<RowDataPacket[]>(
+        'SELECT id FROM tenants WHERE domain = ? AND id <> ? LIMIT 1',
+        [nextDomain, tenantId]
+      );
+
+      if (existing.length > 0) {
+        throw new Error('Subdomain is already in use. Please choose a different subdomain.');
+      }
+    }
+
+    await pool.query(
+      'UPDATE tenants SET domain = ?, updated_at = NOW() WHERE id = ?',
+      [nextDomain, tenantId]
+    );
   }
 
   // ============================================

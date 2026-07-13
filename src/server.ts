@@ -6,6 +6,7 @@
 import express, { Application } from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import path from 'path';
 import { testConnection, closePool } from './config/db';
 import routes from './routes';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler';
@@ -78,6 +79,10 @@ app.use((req, res, next) => {
 // Body parsers
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// Public local uploads, used as a VPS fallback for non-sensitive assets such as business logos.
+// Sensitive files such as payment proofs should continue to use private/signed storage.
+app.use('/uploads', express.static(process.env.LOCAL_UPLOAD_ROOT || path.join(process.cwd(), 'uploads')));
 
 // Request logger
 app.use(requestLogger);
