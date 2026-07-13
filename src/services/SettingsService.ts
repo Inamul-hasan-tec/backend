@@ -339,23 +339,48 @@ export class SettingsService {
   // ============================================
   async getNotificationPreferences(userId: number) {
     const tenantId = getTenantId();
-    const preferences = await this.settingsRepository.getNotificationPreferences(userId, tenantId);
+    let preferences = await this.settingsRepository.getNotificationPreferences(userId, tenantId);
     
     // If no preferences exist, create defaults
     if (!preferences || preferences.length === 0) {
       await this.createDefaultNotificationPreferences(userId);
-      return await this.settingsRepository.getNotificationPreferences(userId, tenantId);
+      preferences = await this.settingsRepository.getNotificationPreferences(userId, tenantId);
     }
 
+    return this.formatNotificationPreferences(preferences || []);
+  }
+
+  private formatNotificationPreferences(preferences: any[]) {
     // Format preferences into structured object
     const formatted: any = {
-      email: {},
-      sms: {},
-      whatsapp: {}
+      email: {
+        booking_created: true,
+        booking_updated: true,
+        booking_cancelled: true,
+        payment_received: true,
+        payment_reminder: true,
+        daily_summary: true,
+      },
+      sms: {
+        booking_created: true,
+        booking_updated: true,
+        booking_cancelled: true,
+        payment_received: true,
+        payment_reminder: true,
+      },
+      whatsapp: {
+        booking_created: true,
+        booking_updated: true,
+        booking_cancelled: true,
+        payment_received: true,
+        payment_reminder: true,
+      }
     };
 
     preferences.forEach((pref: any) => {
-      formatted[pref.channel][pref.event_type] = pref.enabled;
+      if (formatted[pref.channel] && pref.event_type in formatted[pref.channel]) {
+        formatted[pref.channel][pref.event_type] = pref.enabled;
+      }
     });
 
     return formatted;
