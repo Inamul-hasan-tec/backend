@@ -22,6 +22,8 @@ import {
   allocatePaymentToInvoices,
   assertSingleBookingForInvoices,
   assertUniqueTransactionReference,
+  findPaymentByIdempotencyKey,
+  generatePaymentReceiptNumber,
   insertBookingPayment,
   lockBookingAndValidatePayment,
   lockInvoicesForAllocation,
@@ -432,6 +434,16 @@ export class InvoiceRepository extends TenantBaseRepository<Invoice> {
     try {
       await connection.beginTransaction();
 
+      const existingPaymentId = await findPaymentByIdempotencyKey(
+        connection,
+        tenantId,
+        data.idempotency_key
+      );
+      if (existingPaymentId) {
+        await connection.commit();
+        return existingPaymentId;
+      }
+
       const paymentAmount = validatePositiveMoney(Number(data.amount));
       validateAllocationTotal(paymentAmount, data.allocations);
       const invoices = await lockInvoicesForAllocation(
@@ -451,6 +463,7 @@ export class InvoiceRepository extends TenantBaseRepository<Invoice> {
         tenantId,
         data.transaction_reference
       );
+      const receiptNumber = await generatePaymentReceiptNumber(connection, tenantId);
       const paymentId = await insertBookingPayment(connection, {
         tenantId,
         bookingId,
@@ -460,7 +473,10 @@ export class InvoiceRepository extends TenantBaseRepository<Invoice> {
         transactionId: data.transaction_reference || null,
         paymentDate: data.payment_date,
         notes: data.notes || null,
-        receivedBy: null,
+        receivedBy: data.received_by || null,
+        status: 'recorded',
+        idempotencyKey: data.idempotency_key || null,
+        receiptNumber,
       });
 
       await allocatePaymentToInvoices(connection, tenantId, paymentId, data.allocations);

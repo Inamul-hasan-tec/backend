@@ -6,6 +6,8 @@
 import { PaymentRepository } from '../repositories/PaymentRepository';
 import { Payment, CreatePaymentDTO } from '../models/Payment';
 
+const referenceRequiredModes = new Set(['upi', 'bank_transfer', 'cheque', 'card']);
+
 export class PaymentService {
   private paymentRepo: PaymentRepository;
 
@@ -38,11 +40,31 @@ export class PaymentService {
    * Create new payment
    */
   async createPayment(data: CreatePaymentDTO): Promise<number> {
+    if (data.payment_type === 'refund' || data.payment_type === 'correction') {
+      throw new Error('Refunds and corrections must use the controlled payment action flow');
+    }
+    if (referenceRequiredModes.has(data.payment_mode) && !data.transaction_id?.trim()) {
+      throw new Error('Transaction reference is required for this payment mode');
+    }
+
     const paymentData: CreatePaymentDTO = {
       ...data,
+      transaction_id: data.transaction_id?.trim() || undefined,
       payment_date: data.payment_date ? new Date(data.payment_date) : new Date(),
     };
     return this.paymentRepo.createForBooking(paymentData);
+  }
+
+  async verifyPayment(paymentId: number, actorUserId: number): Promise<Payment> {
+    return await this.paymentRepo.verifyPayment(paymentId, actorUserId);
+  }
+
+  async reversePayment(paymentId: number, actorUserId: number, reason: string): Promise<Payment> {
+    return await this.paymentRepo.reversePayment(paymentId, actorUserId, reason);
+  }
+
+  async markPaymentFailed(paymentId: number, actorUserId: number, reason: string): Promise<Payment> {
+    return await this.paymentRepo.markPaymentFailed(paymentId, actorUserId, reason);
   }
 
   /**

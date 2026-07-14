@@ -10,6 +10,7 @@ import InvoicePDFService from '../services/InvoicePDFService';
 import InvoiceEmailService, {
   EmailConfigurationError,
 } from '../services/InvoiceEmailService';
+import AuditRepository from '../repositories/AuditRepository';
 
 export class InvoiceController {
   /**
@@ -364,6 +365,9 @@ export class InvoiceController {
   async recordPayment(req: Request, res: Response): Promise<void> {
     try {
       const paymentData: RecordPaymentDTO = req.body;
+      paymentData.received_by = req.user?.id || null;
+      paymentData.idempotency_key =
+        String(req.headers['idempotency-key'] || req.body.idempotency_key || '').trim() || null;
       if (!paymentData.allocations && req.body.invoice_id && req.body.amount) {
         paymentData.allocations = [
           {
@@ -381,6 +385,16 @@ export class InvoiceController {
         });
         return;
       }
+      if (
+        ['upi', 'bank_transfer', 'cheque', 'card'].includes(paymentData.payment_mode) &&
+        !paymentData.transaction_reference
+      ) {
+        res.status(400).json({
+          success: false,
+          message: 'Transaction reference is required for this payment mode',
+        });
+        return;
+      }
 
       // Validate total allocation matches payment amount
       const totalAllocated = paymentData.allocations.reduce((sum, a) => sum + a.amount, 0);
@@ -393,6 +407,20 @@ export class InvoiceController {
       }
 
       const paymentId = await InvoiceRepository.recordPayment(paymentData);
+      await AuditRepository.recordTenant({
+        actorUserId: req.user?.id,
+        action: 'payment.recorded_from_invoice',
+        entityType: 'payment',
+        entityId: paymentId,
+        newValues: {
+          amount: paymentData.amount,
+          payment_mode: paymentData.payment_mode,
+          payment_date: paymentData.payment_date,
+          allocations: paymentData.allocations,
+          idempotency_key: paymentData.idempotency_key ? '[PRESENT]' : null,
+        },
+        ipAddress: req.ip,
+      });
 
       res.status(201).json({
         success: true,

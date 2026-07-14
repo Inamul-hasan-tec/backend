@@ -38,4 +38,19 @@ router.post('/',
   paymentController.createPayment
 );
 
+router.post('/:id/verify',
+  requirePermission(Permission.PAYMENT_UPDATE),
+  paymentController.verifyPayment
+);
+
+router.post('/:id/reverse',
+  requirePermission(Permission.PAYMENT_UPDATE),
+  paymentController.reversePayment
+);
+
+router.post('/:id/fail',
+  requirePermission(Permission.PAYMENT_UPDATE),
+  paymentController.markPaymentFailed
+);
+
 export default router;

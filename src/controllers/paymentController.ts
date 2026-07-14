@@ -5,6 +5,7 @@
 
 import { Request, Response } from 'express';
 import { PaymentService } from '../services/PaymentService';
+import AuditRepository from '../repositories/AuditRepository';
 
 const paymentService = new PaymentService();
 
@@ -95,8 +96,25 @@ export const getPaymentsByBooking = async (req: Request, res: Response): Promise
  */
 export const createPayment = async (req: Request, res: Response): Promise<void> => {
   try {
-    const paymentData = req.body;
+    const idempotencyKey =
+      String(req.headers['idempotency-key'] || req.body.idempotency_key || '').trim() || undefined;
+    const paymentData = {
+      ...req.body,
+      idempotency_key: idempotencyKey,
+      received_by: req.user?.id,
+    };
     const paymentId = await paymentService.createPayment(paymentData);
+    await AuditRepository.recordTenant({
+      actorUserId: req.user?.id,
+      action: 'payment.recorded',
+      entityType: 'payment',
+      entityId: paymentId,
+      newValues: {
+        ...paymentData,
+        idempotency_key: idempotencyKey ? '[PRESENT]' : null,
+      },
+      ipAddress: req.ip,
+    });
 
     res.status(201).json({
       success: true,
@@ -108,6 +126,126 @@ export const createPayment = async (req: Request, res: Response): Promise<void> 
     res.status(400).json({
       success: false,
       message: error instanceof Error ? error.message : 'Failed to create payment'
+    });
+  }
+};
+
+/**
+ * POST /api/payments/:id/verify
+ * Mark a recorded offline payment as verified.
+ */
+export const verifyPayment = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const paymentId = parseInt(req.params.id, 10);
+    if (!req.user?.id) {
+      res.status(401).json({ success: false, message: 'Unauthorized' });
+      return;
+    }
+
+    const payment = await paymentService.verifyPayment(paymentId, req.user.id);
+    await AuditRepository.recordTenant({
+      actorUserId: req.user.id,
+      action: 'payment.verified',
+      entityType: 'payment',
+      entityId: paymentId,
+      newValues: {
+        status: payment.status,
+        verified_by: req.user.id,
+      },
+      ipAddress: req.ip,
+    });
+
+    res.json({
+      success: true,
+      message: 'Payment verified successfully',
+      data: payment,
+    });
+  } catch (error) {
+    console.error('Error in verifyPayment:', error);
+    res.status(400).json({
+      success: false,
+      message: error instanceof Error ? error.message : 'Failed to verify payment',
+    });
+  }
+};
+
+/**
+ * POST /api/payments/:id/reverse
+ * Reverse a mistaken payment without deleting history.
+ */
+export const reversePayment = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const paymentId = parseInt(req.params.id, 10);
+    const reason = String(req.body.reason || '').trim();
+    if (!req.user?.id) {
+      res.status(401).json({ success: false, message: 'Unauthorized' });
+      return;
+    }
+
+    const payment = await paymentService.reversePayment(paymentId, req.user.id, reason);
+    await AuditRepository.recordTenant({
+      actorUserId: req.user.id,
+      action: 'payment.reversed',
+      entityType: 'payment',
+      entityId: paymentId,
+      newValues: {
+        status: payment.status,
+        reversed_by: req.user.id,
+        reason,
+      },
+      ipAddress: req.ip,
+    });
+
+    res.json({
+      success: true,
+      message: 'Payment reversed successfully',
+      data: payment,
+    });
+  } catch (error) {
+    console.error('Error in reversePayment:', error);
+    res.status(400).json({
+      success: false,
+      message: error instanceof Error ? error.message : 'Failed to reverse payment',
+    });
+  }
+};
+
+/**
+ * POST /api/payments/:id/fail
+ * Mark a cheque/transfer/card payment as failed without deleting history.
+ */
+export const markPaymentFailed = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const paymentId = parseInt(req.params.id, 10);
+    const reason = String(req.body.reason || '').trim();
+    if (!req.user?.id) {
+      res.status(401).json({ success: false, message: 'Unauthorized' });
+      return;
+    }
+
+    const payment = await paymentService.markPaymentFailed(paymentId, req.user.id, reason);
+    await AuditRepository.recordTenant({
+      actorUserId: req.user.id,
+      action: 'payment.failed',
+      entityType: 'payment',
+      entityId: paymentId,
+      newValues: {
+        status: payment.status,
+        failure_reason: reason,
+      },
+      ipAddress: req.ip,
+    });
+
+    res.json({
+      success: true,
+      message: 'Payment marked failed successfully',
+      data: payment,
+    });
+  } catch (error) {
+    console.error('Error in markPaymentFailed:', error);
+    res.status(400).json({
+      success: false,
+      message: error instanceof Error ? error.message : 'Failed to mark payment failed',
     });
   }
 };

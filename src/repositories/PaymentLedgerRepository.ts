@@ -14,6 +14,12 @@ export interface LockedInvoiceRow extends RowDataPacket {
   status: string;
 }
 
+const ACTIVE_PAYMENT_STATUS_SQL = `COALESCE(status, 'recorded') NOT IN ('reversed', 'refunded', 'failed')`;
+
+export function isActivePaymentStatus(status?: string | null): boolean {
+  return !['reversed', 'refunded', 'failed'].includes(status || 'recorded');
+}
+
 export function roundMoney(value: number): number {
   return Math.round(value * 100) / 100;
 }
@@ -65,6 +71,48 @@ export async function assertUniqueTransactionReference(
   }
 }
 
+export async function findPaymentByIdempotencyKey(
+  connection: PoolConnection,
+  tenantId: number,
+  idempotencyKey?: string | null
+): Promise<number | null> {
+  if (!idempotencyKey) {
+    return null;
+  }
+
+  const [rows] = await connection.execute<RowDataPacket[]>(
+    `SELECT id
+     FROM payments
+     WHERE tenant_id = ? AND idempotency_key = ?
+     LIMIT 1`,
+    [tenantId, idempotencyKey]
+  );
+
+  return rows[0]?.id ? Number(rows[0].id) : null;
+}
+
+export async function generatePaymentReceiptNumber(
+  connection: PoolConnection,
+  tenantId: number
+): Promise<string> {
+  const datePrefix = new Date().toISOString().slice(0, 7).replace('-', '');
+  const [rows] = await connection.execute<RowDataPacket[]>(
+    `SELECT receipt_number
+     FROM payments
+     WHERE tenant_id = ? AND receipt_number LIKE ?
+     ORDER BY id DESC
+     LIMIT 1`,
+    [tenantId, `RCPT-${datePrefix}-T${tenantId}-%`]
+  );
+
+  const lastReceipt = rows[0]?.receipt_number;
+  const nextSequence = lastReceipt
+    ? Number(String(lastReceipt).split('-').pop() || '0') + 1
+    : 1;
+
+  return `RCPT-${datePrefix}-T${tenantId}-${String(nextSequence).padStart(4, '0')}`;
+}
+
 export async function insertBookingPayment(
   connection: PoolConnection,
   data: {
@@ -77,13 +125,17 @@ export async function insertBookingPayment(
     paymentDate: string | Date;
     notes?: string | null;
     receivedBy?: number | null;
+    status?: string;
+    idempotencyKey?: string | null;
+    receiptNumber?: string | null;
   }
 ): Promise<number> {
   const [paymentResult] = await connection.execute<ResultSetHeader>(
     `INSERT INTO payments (
       tenant_id, booking_id, amount, payment_mode, payment_type,
-      transaction_id, payment_date, notes, received_by
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      transaction_id, payment_date, notes, received_by, status,
+      idempotency_key, receipt_number
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       data.tenantId,
       data.bookingId,
@@ -94,6 +146,9 @@ export async function insertBookingPayment(
       data.paymentDate,
       data.notes || null,
       data.receivedBy || null,
+      data.status || 'recorded',
+      data.idempotencyKey || null,
+      data.receiptNumber || null,
     ]
   );
 
@@ -121,7 +176,8 @@ export async function lockBookingAndValidatePayment(
   const [paymentRows] = await connection.execute<RowDataPacket[]>(
     `SELECT COALESCE(SUM(amount), 0) AS total_paid
      FROM payments
-     WHERE booking_id = ? AND tenant_id = ?`,
+     WHERE booking_id = ? AND tenant_id = ?
+       AND ${ACTIVE_PAYMENT_STATUS_SQL}`,
     [bookingId, tenantId]
   );
   const totalPaid = Number(paymentRows[0]?.total_paid || 0);
@@ -133,6 +189,41 @@ export async function lockBookingAndValidatePayment(
   }
 
   return { totalAmount, updatedTotalPaid };
+}
+
+export async function recalculateBookingPaymentTotals(
+  connection: PoolConnection,
+  tenantId: number,
+  bookingId: number
+): Promise<{ totalAmount: number; totalPaid: number; balanceAmount: number }> {
+  const [bookingRows] = await connection.execute<RowDataPacket[]>(
+    `SELECT id, total_amount
+     FROM bookings
+     WHERE id = ? AND tenant_id = ?
+     FOR UPDATE`,
+    [bookingId, tenantId]
+  );
+  const booking = bookingRows[0];
+  if (!booking) {
+    throw new Error('Booking not found');
+  }
+
+  const [paymentRows] = await connection.execute<RowDataPacket[]>(
+    `SELECT COALESCE(SUM(amount), 0) AS total_paid
+     FROM payments
+     WHERE booking_id = ? AND tenant_id = ?
+       AND ${ACTIVE_PAYMENT_STATUS_SQL}`,
+    [bookingId, tenantId]
+  );
+  const totalAmount = Number(booking.total_amount);
+  const totalPaid = roundMoney(Number(paymentRows[0]?.total_paid || 0));
+  await updateBookingPaymentTotals(connection, tenantId, bookingId, totalAmount, totalPaid);
+
+  return {
+    totalAmount,
+    totalPaid,
+    balanceAmount: roundMoney(totalAmount - totalPaid),
+  };
 }
 
 export async function updateBookingPaymentTotals(
@@ -302,6 +393,7 @@ export async function allocateExistingBookingPaymentsToInvoice(
       AND ipa.tenant_id = p.tenant_id
      WHERE p.tenant_id = ?
        AND p.booking_id = ?
+       AND ${ACTIVE_PAYMENT_STATUS_SQL.replace(/status/g, 'p.status')}
      GROUP BY p.id, p.amount
      HAVING ROUND(p.amount - allocated_amount, 2) > 0
      ORDER BY p.payment_date ASC, p.id ASC`,

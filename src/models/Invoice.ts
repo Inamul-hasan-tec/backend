@@ -186,4 +186,6 @@ export interface RecordPaymentDTO {
   transaction_reference: string | null;
   notes: string | null;
   allocations: PaymentAllocation[];
+  received_by?: number | null;
+  idempotency_key?: string | null;
 }

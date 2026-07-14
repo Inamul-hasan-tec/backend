@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {
   assertSingleBookingForInvoices,
+  isActivePaymentStatus,
   validateAllocationTotal,
   validatePositiveMoney,
 } from '../src/repositories/PaymentLedgerRepository';
@@ -70,4 +71,12 @@ export function testPaymentLedgerInvariants() {
       ]),
     /same booking/i
   );
+
+  assert.equal(isActivePaymentStatus(undefined), true);
+  assert.equal(isActivePaymentStatus(null), true);
+  assert.equal(isActivePaymentStatus('recorded'), true);
+  assert.equal(isActivePaymentStatus('verified'), true);
+  assert.equal(isActivePaymentStatus('reversed'), false);
+  assert.equal(isActivePaymentStatus('refunded'), false);
+  assert.equal(isActivePaymentStatus('failed'), false);
 }
