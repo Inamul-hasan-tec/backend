@@ -30,7 +30,34 @@ export class PaymentRepository extends TenantBaseRepository<Payment> {
    * Get all payments
    */
   async findAllPayments(limit?: number, offset?: number): Promise<Payment[]> {
-    return this.findAll(limit, offset);
+    const tenantId = getTenantId();
+    let sql = `
+      SELECT
+        p.*,
+        b.event_date,
+        b.time_slot,
+        b.payment_status AS booking_payment_status,
+        c.name AS customer_name,
+        c.phone AS customer_phone,
+        h.name AS hall_name
+      FROM payments p
+      LEFT JOIN bookings b ON b.id = p.booking_id AND b.tenant_id = p.tenant_id
+      LEFT JOIN customers c ON c.id = b.customer_id AND c.tenant_id = p.tenant_id
+      LEFT JOIN halls h ON h.id = b.hall_id AND h.tenant_id = p.tenant_id
+      WHERE p.tenant_id = ?
+      ORDER BY p.payment_date DESC, p.id DESC
+    `;
+
+    if (limit !== undefined && limit > 0) {
+      sql += ` LIMIT ${Math.floor(Math.abs(limit))}`;
+    }
+
+    if (offset !== undefined && offset >= 0) {
+      sql += ` OFFSET ${Math.floor(Math.abs(offset))}`;
+    }
+
+    const [rows] = await pool.execute<RowDataPacket[]>(sql, [tenantId]);
+    return rows as Payment[];
   }
 
   /**

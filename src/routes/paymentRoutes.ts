@@ -27,12 +27,12 @@ router.get('/reconciliation',
   paymentController.getPaymentReconciliation
 );
 
-router.get('/booking/:bookingId', 
+router.get('/booking/:bookingId(\\d+)', 
   requirePermission(Permission.PAYMENT_LIST),
   paymentController.getPaymentsByBooking
 );
 
-router.get('/:id', 
+router.get('/:id(\\d+)', 
   requirePermission(Permission.PAYMENT_VIEW),
   paymentController.getPaymentById
 );
@@ -43,17 +43,17 @@ router.post('/',
   paymentController.createPayment
 );
 
-router.post('/:id/verify',
+router.post('/:id(\\d+)/verify',
   requirePermission(Permission.PAYMENT_UPDATE),
   paymentController.verifyPayment
 );
 
-router.post('/:id/reverse',
+router.post('/:id(\\d+)/reverse',
   requirePermission(Permission.PAYMENT_UPDATE),
   paymentController.reversePayment
 );
 
-router.post('/:id/fail',
+router.post('/:id(\\d+)/fail',
   requirePermission(Permission.PAYMENT_UPDATE),
   paymentController.markPaymentFailed
 );
