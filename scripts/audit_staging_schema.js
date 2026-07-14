@@ -21,6 +21,7 @@ const expectedMigrations = [
   '312_tenant_schema_drift_guards.sql',
   '313_hall_scoped_packages.sql',
   '314_discount_template_tenant_scope.sql',
+  '315_payment_machine.sql',
 ];
 
 const productionTarget = process.env.HALL_SYNC_PRODUCTION_TARGET === 'true';

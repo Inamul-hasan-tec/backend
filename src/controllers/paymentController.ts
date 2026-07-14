@@ -271,3 +271,26 @@ export const getPaymentStats = async (req: Request, res: Response): Promise<void
     });
   }
 };
+
+/**
+ * GET /api/payments/reconciliation
+ * Tenant-scoped payment review summary and action queue.
+ */
+export const getPaymentReconciliation = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const reconciliation = await paymentService.getPaymentReconciliation();
+
+    res.json({
+      success: true,
+      message: 'Payment reconciliation retrieved successfully',
+      data: reconciliation,
+    });
+  } catch (error) {
+    console.error('Error in getPaymentReconciliation:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to retrieve payment reconciliation',
+      error: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+};

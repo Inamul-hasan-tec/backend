@@ -358,6 +358,101 @@ export class PaymentRepository extends TenantBaseRepository<Payment> {
     `, [tenantId]);
     return rows;
   }
+
+  async getReconciliation() {
+    const tenantId = getTenantId();
+    const [summaryRows] = await pool.execute<RowDataPacket[]>(
+      `SELECT
+        COUNT(*) AS total_records,
+        SUM(CASE WHEN COALESCE(status, 'recorded') NOT IN ('reversed', 'refunded', 'failed') THEN 1 ELSE 0 END) AS active_count,
+        COALESCE(SUM(CASE WHEN COALESCE(status, 'recorded') NOT IN ('reversed', 'refunded', 'failed') THEN amount ELSE 0 END), 0) AS active_amount,
+        SUM(CASE WHEN COALESCE(status, 'recorded') = 'recorded' THEN 1 ELSE 0 END) AS needs_verification_count,
+        COALESCE(SUM(CASE WHEN COALESCE(status, 'recorded') = 'recorded' THEN amount ELSE 0 END), 0) AS needs_verification_amount,
+        SUM(CASE WHEN COALESCE(status, 'recorded') = 'verified' THEN 1 ELSE 0 END) AS verified_count,
+        COALESCE(SUM(CASE WHEN COALESCE(status, 'recorded') = 'verified' THEN amount ELSE 0 END), 0) AS verified_amount,
+        SUM(CASE WHEN COALESCE(status, 'recorded') = 'failed' THEN 1 ELSE 0 END) AS failed_count,
+        SUM(CASE WHEN COALESCE(status, 'recorded') = 'reversed' THEN 1 ELSE 0 END) AS reversed_count,
+        SUM(CASE
+          WHEN COALESCE(status, 'recorded') NOT IN ('reversed', 'refunded', 'failed')
+           AND payment_mode IN ('upi', 'bank_transfer', 'cheque', 'card')
+           AND (transaction_id IS NULL OR TRIM(transaction_id) = '')
+          THEN 1 ELSE 0
+        END) AS missing_reference_count,
+        COALESCE(SUM(CASE
+          WHEN COALESCE(status, 'recorded') NOT IN ('reversed', 'refunded', 'failed')
+           AND DATE(payment_date) = CURRENT_DATE()
+          THEN amount ELSE 0
+        END), 0) AS today_active_amount,
+        SUM(CASE
+          WHEN COALESCE(status, 'recorded') NOT IN ('reversed', 'refunded', 'failed')
+           AND DATE(payment_date) = CURRENT_DATE()
+          THEN 1 ELSE 0
+        END) AS today_active_count
+       FROM payments
+       WHERE tenant_id = ?`,
+      [tenantId]
+    );
+
+    const [reviewRows] = await pool.execute<RowDataPacket[]>(
+      `SELECT
+        p.id,
+        p.booking_id,
+        p.receipt_number,
+        p.amount,
+        p.payment_mode,
+        p.payment_type,
+        p.transaction_id,
+        COALESCE(p.status, 'recorded') AS status,
+        p.payment_date,
+        p.verified_at,
+        p.reversed_at,
+        p.reversal_reason,
+        p.failure_reason,
+        b.event_date,
+        b.time_slot,
+        c.name AS customer_name,
+        h.name AS hall_name,
+        CASE
+          WHEN COALESCE(p.status, 'recorded') = 'recorded' THEN 'needs_verification'
+          WHEN COALESCE(p.status, 'recorded') = 'failed' THEN 'failed'
+          WHEN COALESCE(p.status, 'recorded') = 'reversed' THEN 'reversed'
+          WHEN COALESCE(p.status, 'recorded') NOT IN ('reversed', 'refunded', 'failed')
+           AND p.payment_mode IN ('upi', 'bank_transfer', 'cheque', 'card')
+           AND (p.transaction_id IS NULL OR TRIM(p.transaction_id) = '')
+          THEN 'missing_reference'
+          ELSE 'review'
+        END AS review_reason
+       FROM payments p
+       LEFT JOIN bookings b ON b.id = p.booking_id AND b.tenant_id = p.tenant_id
+       LEFT JOIN customers c ON c.id = b.customer_id AND c.tenant_id = p.tenant_id
+       LEFT JOIN halls h ON h.id = b.hall_id AND h.tenant_id = p.tenant_id
+       WHERE p.tenant_id = ?
+         AND (
+          COALESCE(p.status, 'recorded') IN ('recorded', 'failed', 'reversed')
+          OR (
+            COALESCE(p.status, 'recorded') NOT IN ('reversed', 'refunded', 'failed')
+            AND p.payment_mode IN ('upi', 'bank_transfer', 'cheque', 'card')
+            AND (p.transaction_id IS NULL OR TRIM(p.transaction_id) = '')
+          )
+         )
+       ORDER BY
+        CASE COALESCE(p.status, 'recorded')
+          WHEN 'recorded' THEN 1
+          WHEN 'failed' THEN 2
+          WHEN 'reversed' THEN 3
+          ELSE 4
+        END,
+        p.payment_date DESC,
+        p.id DESC
+       LIMIT 25`,
+      [tenantId]
+    );
+
+    return {
+      summary: summaryRows[0] || {},
+      review_items: reviewRows,
+    };
+  }
 }
 
 export function validatePaymentTotal(

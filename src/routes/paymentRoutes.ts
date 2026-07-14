@@ -22,6 +22,11 @@ router.get('/stats',
   paymentController.getPaymentStats
 );
 
+router.get('/reconciliation',
+  requirePermission(Permission.PAYMENT_VIEW),
+  paymentController.getPaymentReconciliation
+);
+
 router.get('/booking/:bookingId', 
   requirePermission(Permission.PAYMENT_LIST),
   paymentController.getPaymentsByBooking

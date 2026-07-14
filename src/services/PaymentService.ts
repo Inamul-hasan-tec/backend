@@ -74,6 +74,10 @@ export class PaymentService {
     return await this.paymentRepo.getStats();
   }
 
+  async getPaymentReconciliation() {
+    return await this.paymentRepo.getReconciliation();
+  }
+
   /**
    * Get total payments for a booking
    */
