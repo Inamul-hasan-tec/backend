@@ -1,0 +1,84 @@
+name: Deploy Backend
+
+on:
+  push:
+    branches:
+      - production
+  workflow_dispatch:
+
+concurrency:
+  group: backend-production-deploy
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: Verify backend build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+  deploy:
+    name: Deploy backend to VPS
+    runs-on: ubuntu-latest
+    needs: verify
+
+    steps:
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          BACKEND_PATH: ${{ secrets.BACKEND_PATH }}
+          BACKEND_BRANCH: ${{ secrets.BACKEND_BRANCH }}
+          BACKEND_SERVICE_NAME: ${{ secrets.BACKEND_SERVICE_NAME }}
+          API_HEALTH_URL: ${{ secrets.API_HEALTH_URL }}
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          envs: BACKEND_PATH,BACKEND_BRANCH,BACKEND_SERVICE_NAME,API_HEALTH_URL
+          script: |
+            set -euo pipefail
+
+            BACKEND_PATH="${BACKEND_PATH:-/var/www/hallsync/backend}"
+            BACKEND_BRANCH="${BACKEND_BRANCH:-production}"
+            BACKEND_SERVICE_NAME="${BACKEND_SERVICE_NAME:-hallsync-api}"
+            API_HEALTH_URL="${API_HEALTH_URL:-https://api.hallsync.in/api/health}"
+
+            cd "$BACKEND_PATH"
+
+            git fetch origin "$BACKEND_BRANCH"
+            git checkout "$BACKEND_BRANCH"
+            git reset --hard "origin/$BACKEND_BRANCH"
+
+            npm ci
+            npm run build
+
+            systemctl restart "$BACKEND_SERVICE_NAME"
+
+            for attempt in 1 2 3 4 5; do
+              if curl --fail --silent --show-error "$API_HEALTH_URL" > /tmp/hallsync-api-health.json; then
+                cat /tmp/hallsync-api-health.json
+                exit 0
+              fi
+
+              echo "Health check failed on attempt $attempt; retrying..."
+              sleep 5
+            done
+
+            echo "Backend deploy finished, but health check failed: $API_HEALTH_URL"
+            systemctl status "$BACKEND_SERVICE_NAME" --no-pager || true
+            journalctl -u "$BACKEND_SERVICE_NAME" -n 80 --no-pager || true
+            exit 1
