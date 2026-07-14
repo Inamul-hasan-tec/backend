@@ -103,7 +103,10 @@ export const createBooking = asyncHandler(async (req: Request, res: Response) =>
   
   try {
     // Create booking
-    const bookingId = await bookingService.createBooking(req.body);
+    const bookingId = await bookingService.createBooking({
+      ...req.body,
+      created_by: req.user?.id,
+    });
     console.log(`✅ Booking created with ID: ${bookingId} in ${Date.now() - startTime}ms`);
     
     // Fetch booking details

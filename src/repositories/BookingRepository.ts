@@ -9,6 +9,11 @@ import { Booking, BookingDetails, BookingSearchParams } from '../models/Booking'
 import pool, { getConnection } from '../config/db';
 import { validateLimit } from '../utils/validators';
 import { getTenantId } from '../utils/tenantContext';
+import {
+  generatePaymentReceiptNumber,
+  insertBookingPayment,
+  roundMoney,
+} from './PaymentLedgerRepository';
 
 export class BookingRepository extends TenantBaseRepository<Booking> {
   constructor() {
@@ -197,6 +202,26 @@ export class BookingRepository extends TenantBaseRepository<Booking> {
             bookingId,
           ]
         );
+      }
+
+      const advanceAmount = roundMoney(Number(bookingData.advance_amount || 0));
+      if (advanceAmount > 0) {
+        const totalAmount = roundMoney(Number(bookingData.total_amount || 0));
+        const receiptNumber = await generatePaymentReceiptNumber(connection, tenantId);
+        await insertBookingPayment(connection, {
+          tenantId,
+          bookingId,
+          amount: advanceAmount,
+          paymentMode: String(bookingData.payment_mode || 'cash'),
+          paymentType: advanceAmount >= totalAmount ? 'full' : 'advance',
+          transactionId: null,
+          paymentDate: new Date(),
+          notes: 'Initial payment recorded during booking creation',
+          receivedBy: Number(bookingData.created_by || 0) || null,
+          status: 'recorded',
+          idempotencyKey: `booking:${bookingId}:initial-payment`,
+          receiptNumber,
+        });
       }
 
       await connection.commit();
