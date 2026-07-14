@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import pool from '../config/db';
 import { RowDataPacket, ResultSetHeader } from 'mysql2';
+import { getTenantId } from '../utils/tenantContext';
 
 export class FlexibleBillingController {
   /**
@@ -9,6 +10,7 @@ export class FlexibleBillingController {
    */
   static async addPrivateNote(req: Request, res: Response) {
     try {
+      const tenantId = getTenantId();
       const bookingId = parseInt(req.params.id);
       const {
         note_type,
@@ -20,6 +22,14 @@ export class FlexibleBillingController {
       } = req.body;
 
       const userId = (req as any).user?.id;
+
+      const [bookingRows] = await pool.query<RowDataPacket[]>(
+        'SELECT id FROM bookings WHERE id = ? AND tenant_id = ? LIMIT 1',
+        [bookingId, tenantId]
+      );
+      if (bookingRows.length === 0) {
+        return res.status(404).json({ success: false, message: 'Booking not found' });
+      }
 
       const [result] = await pool.query<ResultSetHeader>(
         `INSERT INTO booking_private_notes 
@@ -54,13 +64,16 @@ export class FlexibleBillingController {
    */
   static async getPrivateNotes(req: Request, res: Response) {
     try {
+      const tenantId = getTenantId();
       const bookingId = parseInt(req.params.id);
 
       const [rows] = await pool.query<RowDataPacket[]>(
-        `SELECT * FROM booking_private_notes 
-         WHERE booking_id = ? 
-         ORDER BY created_at DESC`,
-        [bookingId]
+        `SELECT bpn.*
+         FROM booking_private_notes bpn
+         INNER JOIN bookings b ON b.id = bpn.booking_id
+         WHERE bpn.booking_id = ? AND b.tenant_id = ?
+         ORDER BY bpn.created_at DESC`,
+        [bookingId, tenantId]
       );
 
       res.json({
@@ -83,11 +96,15 @@ export class FlexibleBillingController {
    */
   static async deletePrivateNote(req: Request, res: Response) {
     try {
+      const tenantId = getTenantId();
       const noteId = parseInt(req.params.id);
 
       await pool.query(
-        'DELETE FROM booking_private_notes WHERE id = ?',
-        [noteId]
+        `DELETE bpn
+         FROM booking_private_notes bpn
+         INNER JOIN bookings b ON b.id = bpn.booking_id
+         WHERE bpn.id = ? AND b.tenant_id = ?`,
+        [noteId, tenantId]
       );
 
       res.json({
@@ -110,6 +127,7 @@ export class FlexibleBillingController {
    */
   static async addAdditionalPayment(req: Request, res: Response) {
     try {
+      const tenantId = getTenantId();
       const bookingId = parseInt(req.params.id);
       const {
         invoice_id,
@@ -124,6 +142,14 @@ export class FlexibleBillingController {
 
       const userId = (req as any).user?.id;
 
+      const [bookingRows] = await pool.query<RowDataPacket[]>(
+        'SELECT id FROM bookings WHERE id = ? AND tenant_id = ? LIMIT 1',
+        [bookingId, tenantId]
+      );
+      if (bookingRows.length === 0) {
+        return res.status(404).json({ success: false, message: 'Booking not found' });
+      }
+
       const [result] = await pool.query<ResultSetHeader>(
         `INSERT INTO additional_payments 
          (booking_id, invoice_id, amount, payment_date, payment_mode, 
@@ -137,8 +163,8 @@ export class FlexibleBillingController {
       await pool.query(
         `UPDATE bookings 
          SET additional_amount = additional_amount + ?
-         WHERE id = ?`,
-        [amount, bookingId]
+         WHERE id = ? AND tenant_id = ?`,
+        [amount, bookingId, tenantId]
       );
 
       res.status(201).json({
@@ -166,13 +192,16 @@ export class FlexibleBillingController {
    */
   static async getAdditionalPayments(req: Request, res: Response) {
     try {
+      const tenantId = getTenantId();
       const bookingId = parseInt(req.params.id);
 
       const [rows] = await pool.query<RowDataPacket[]>(
-        `SELECT * FROM additional_payments 
-         WHERE booking_id = ? 
-         ORDER BY payment_date DESC`,
-        [bookingId]
+        `SELECT ap.*
+         FROM additional_payments ap
+         INNER JOIN bookings b ON b.id = ap.booking_id
+         WHERE ap.booking_id = ? AND b.tenant_id = ?
+         ORDER BY ap.payment_date DESC`,
+        [bookingId, tenantId]
       );
 
       res.json({
@@ -196,18 +225,20 @@ export class FlexibleBillingController {
    */
   static async getDiscountTemplates(req: Request, res: Response) {
     try {
+      const tenantId = getTenantId();
       // Check if we should filter by active only
       const activeOnly = req.query.active_only === 'true';
       
-      let query = 'SELECT * FROM discount_templates';
+      let query = 'SELECT * FROM discount_templates WHERE tenant_id = ?';
+      const params: any[] = [tenantId];
       
       if (activeOnly) {
-        query += ' WHERE is_active = 1';
+        query += ' AND is_active = 1';
       }
       
       query += ' ORDER BY name';
 
-      const [rows] = await pool.query<RowDataPacket[]>(query);
+      const [rows] = await pool.query<RowDataPacket[]>(query, params);
 
       res.json({
         success: true,
@@ -229,6 +260,7 @@ export class FlexibleBillingController {
    */
   static async createDiscountTemplate(req: Request, res: Response) {
     try {
+      const tenantId = getTenantId();
       const {
         name,
         description,
@@ -239,9 +271,9 @@ export class FlexibleBillingController {
 
       const [result] = await pool.query<ResultSetHeader>(
         `INSERT INTO discount_templates 
-         (name, description, discount_type, discount_value, reason_template)
-         VALUES (?, ?, ?, ?, ?)`,
-        [name, description, discount_type, discount_value, reason_template]
+         (tenant_id, name, description, discount_type, discount_value, reason_template)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        [tenantId, name, description, discount_type, discount_value, reason_template]
       );
 
       res.status(201).json({
@@ -267,6 +299,7 @@ export class FlexibleBillingController {
    */
   static async updateDiscountTemplate(req: Request, res: Response) {
     try {
+      const tenantId = getTenantId();
       const templateId = parseInt(req.params.id);
       const {
         name,
@@ -313,12 +346,12 @@ export class FlexibleBillingController {
         });
       }
 
-      values.push(templateId);
+      values.push(templateId, tenantId);
 
       await pool.query(
         `UPDATE discount_templates 
          SET ${updates.join(', ')}
-         WHERE id = ?`,
+         WHERE id = ? AND tenant_id = ?`,
         values
       );
 
@@ -342,11 +375,12 @@ export class FlexibleBillingController {
    */
   static async deleteDiscountTemplate(req: Request, res: Response) {
     try {
+      const tenantId = getTenantId();
       const templateId = parseInt(req.params.id);
 
       await pool.query(
-        'DELETE FROM discount_templates WHERE id = ?',
-        [templateId]
+        'DELETE FROM discount_templates WHERE id = ? AND tenant_id = ?',
+        [templateId, tenantId]
       );
 
       res.json({
@@ -369,6 +403,7 @@ export class FlexibleBillingController {
    */
   static async getBookingSummary(req: Request, res: Response) {
     try {
+      const tenantId = getTenantId();
       const bookingId = parseInt(req.params.id);
 
       // Get booking details
@@ -382,8 +417,8 @@ export class FlexibleBillingController {
           additional_amount,
           status
          FROM bookings 
-         WHERE id = ?`,
-        [bookingId]
+         WHERE id = ? AND tenant_id = ?`,
+        [bookingId, tenantId]
       );
 
       if (bookingRows.length === 0) {
@@ -406,9 +441,9 @@ export class FlexibleBillingController {
           status,
           is_partial_invoice
          FROM invoices 
-         WHERE booking_id = ?
+         WHERE booking_id = ? AND tenant_id = ?
          ORDER BY created_at DESC`,
-        [bookingId]
+        [bookingId, tenantId]
       );
 
       // Get private notes
@@ -418,10 +453,11 @@ export class FlexibleBillingController {
           amount,
           description,
           created_at
-         FROM booking_private_notes 
-         WHERE booking_id = ? AND is_private = 1
-         ORDER BY created_at DESC`,
-        [bookingId]
+         FROM booking_private_notes bpn
+         INNER JOIN bookings b ON b.id = bpn.booking_id
+         WHERE bpn.booking_id = ? AND b.tenant_id = ? AND bpn.is_private = 1
+         ORDER BY bpn.created_at DESC`,
+        [bookingId, tenantId]
       );
 
       // Get additional payments
@@ -433,10 +469,11 @@ export class FlexibleBillingController {
           category,
           description,
           show_in_gst_reports
-         FROM additional_payments 
-         WHERE booking_id = ?
-         ORDER BY payment_date DESC`,
-        [bookingId]
+         FROM additional_payments ap
+         INNER JOIN bookings b ON b.id = ap.booking_id
+         WHERE ap.booking_id = ? AND b.tenant_id = ?
+         ORDER BY ap.payment_date DESC`,
+        [bookingId, tenantId]
       );
 
       res.json({
@@ -486,6 +523,7 @@ export class FlexibleBillingController {
    */
   static async generateGSTReport(req: Request, res: Response) {
     try {
+      const tenantId = getTenantId();
       const {
         from_date,
         to_date,
@@ -517,10 +555,10 @@ export class FlexibleBillingController {
           i.billing_strategy,
           i.complimentary_value
         FROM invoices i
-        WHERE i.status != 'cancelled'
+        WHERE i.tenant_id = ? AND i.status != 'cancelled'
       `;
 
-      const params: any[] = [];
+      const params: any[] = [tenantId];
 
       if (from_date) {
         query += ' AND i.invoice_date >= ?';
@@ -592,6 +630,7 @@ export class FlexibleBillingController {
    */
   static async updateBookingAmounts(req: Request, res: Response) {
     try {
+      const tenantId = getTenantId();
       const bookingId = parseInt(req.params.id);
       const {
         agreed_amount,
@@ -605,8 +644,8 @@ export class FlexibleBillingController {
              invoiced_amount = ?,
              additional_amount = ?,
              updated_at = NOW()
-         WHERE id = ?`,
-        [agreed_amount, invoiced_amount, additional_amount, bookingId]
+         WHERE id = ? AND tenant_id = ?`,
+        [agreed_amount, invoiced_amount, additional_amount, bookingId, tenantId]
       );
 
       res.json({

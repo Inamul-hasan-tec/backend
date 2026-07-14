@@ -1,9 +1,10 @@
 /**
  * Service Catalog Repository
- * Handles database operations for service catalog
+ * Handles database operations for service catalog with Strict Multi-Tenancy via ALS
  */
 
 import pool from '../config/db';
+import { TenantBaseRepository } from './TenantBaseRepository';
 import { 
   ServiceCatalog, 
   CreateServiceDTO, 
@@ -11,14 +12,20 @@ import {
   ServiceListFilters 
 } from '../models/ServiceCatalog';
 import { RowDataPacket, ResultSetHeader } from 'mysql2';
+import { getTenantId } from '../utils/tenantContext';
 
-export class ServiceCatalogRepository {
+export class ServiceCatalogRepository extends TenantBaseRepository<ServiceCatalog> {
+  constructor() {
+    super('service_catalog');
+  }
+
   /**
    * Get all services with optional filters
    */
-  async getAll(filters?: ServiceListFilters): Promise<ServiceCatalog[]> {
-    let query = 'SELECT * FROM service_catalog WHERE 1=1';
-    const params: any[] = [];
+  async getAllServices(filters?: ServiceListFilters): Promise<ServiceCatalog[]> {
+    const tenantId = getTenantId();
+    let query = 'SELECT * FROM service_catalog WHERE tenant_id = ?';
+    const params: any[] = [tenantId];
 
     if (filters?.category) {
       query += ' AND category = ?';
@@ -43,24 +50,13 @@ export class ServiceCatalogRepository {
   }
 
   /**
-   * Get service by ID
-   */
-  async getById(id: number): Promise<ServiceCatalog | null> {
-    const [rows] = await pool.query<RowDataPacket[]>(
-      'SELECT * FROM service_catalog WHERE id = ?',
-      [id]
-    );
-
-    return rows.length > 0 ? (rows[0] as ServiceCatalog) : null;
-  }
-
-  /**
    * Get service by service code
    */
   async getByCode(serviceCode: string): Promise<ServiceCatalog | null> {
+    const tenantId = getTenantId();
     const [rows] = await pool.query<RowDataPacket[]>(
-      'SELECT * FROM service_catalog WHERE service_code = ?',
-      [serviceCode]
+      'SELECT * FROM service_catalog WHERE service_code = ? AND tenant_id = ?',
+      [serviceCode, tenantId]
     );
 
     return rows.length > 0 ? (rows[0] as ServiceCatalog) : null;
@@ -69,17 +65,19 @@ export class ServiceCatalogRepository {
   /**
    * Create new service
    */
-  async create(data: CreateServiceDTO): Promise<number> {
+  async createService(data: CreateServiceDTO): Promise<number> {
+    const tenantId = getTenantId();
     const query = `
       INSERT INTO service_catalog (
-        service_code, name, category, base_price, unit,
+        tenant_id, service_code, name, category, base_price, unit,
         min_quantity, max_quantity, sac_code, hsn_code,
         gst_rate, is_taxable, tax_exemption_reason,
         description, inclusions, terms, is_active, display_order
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
 
     const values = [
+      tenantId,
       data.service_code,
       data.name,
       data.category,
@@ -106,12 +104,13 @@ export class ServiceCatalogRepository {
   /**
    * Update service
    */
-  async update(id: number, data: UpdateServiceDTO): Promise<boolean> {
+  async updateService(id: number, data: UpdateServiceDTO): Promise<boolean> {
+    const tenantId = getTenantId();
     const fields: string[] = [];
     const values: any[] = [];
 
     Object.entries(data).forEach(([key, value]) => {
-      if (value !== undefined) {
+      if (value !== undefined && key !== 'tenant_id') {
         fields.push(`${key} = ?`);
         values.push(value);
       }
@@ -121,12 +120,12 @@ export class ServiceCatalogRepository {
       return false;
     }
 
-    values.push(id);
+    values.push(id, tenantId);
 
     const query = `
       UPDATE service_catalog 
       SET ${fields.join(', ')}, updated_at = CURRENT_TIMESTAMP
-      WHERE id = ?
+      WHERE id = ? AND tenant_id = ?
     `;
 
     const [result] = await pool.query<ResultSetHeader>(query, values);
@@ -137,9 +136,10 @@ export class ServiceCatalogRepository {
    * Delete service (soft delete by setting is_active = false)
    */
   async delete(id: number): Promise<boolean> {
+    const tenantId = getTenantId();
     const [result] = await pool.query<ResultSetHeader>(
-      'UPDATE service_catalog SET is_active = FALSE WHERE id = ?',
-      [id]
+      'UPDATE service_catalog SET is_active = FALSE WHERE id = ? AND tenant_id = ?',
+      [id, tenantId]
     );
 
     return result.affectedRows > 0;
@@ -149,20 +149,22 @@ export class ServiceCatalogRepository {
    * Hard delete service
    */
   async hardDelete(id: number): Promise<boolean> {
+    const tenantId = getTenantId();
     const [result] = await pool.query<ResultSetHeader>(
-      'DELETE FROM service_catalog WHERE id = ?',
-      [id]
+      'DELETE FROM service_catalog WHERE id = ? AND tenant_id = ?',
+      [id, tenantId]
     );
 
     return result.affectedRows > 0;
   }
 
   /**
-   * Check if service code is unique
+   * Check if service code is unique (per tenant)
    */
   async isServiceCodeUnique(serviceCode: string, excludeId?: number): Promise<boolean> {
-    let query = 'SELECT COUNT(*) as count FROM service_catalog WHERE service_code = ?';
-    const params: any[] = [serviceCode];
+    const tenantId = getTenantId();
+    let query = 'SELECT COUNT(*) as count FROM service_catalog WHERE service_code = ? AND tenant_id = ?';
+    const params: any[] = [serviceCode, tenantId];
 
     if (excludeId) {
       query += ' AND id != ?';
@@ -177,9 +179,10 @@ export class ServiceCatalogRepository {
    * Get services by category
    */
   async getByCategory(category: string): Promise<ServiceCatalog[]> {
+    const tenantId = getTenantId();
     const [rows] = await pool.query<RowDataPacket[]>(
-      'SELECT * FROM service_catalog WHERE category = ? AND is_active = TRUE ORDER BY display_order ASC, name ASC',
-      [category]
+      'SELECT * FROM service_catalog WHERE category = ? AND is_active = TRUE AND tenant_id = ? ORDER BY display_order ASC, name ASC',
+      [category, tenantId]
     );
 
     return rows as ServiceCatalog[];
@@ -189,8 +192,10 @@ export class ServiceCatalogRepository {
    * Get active services only
    */
   async getActive(): Promise<ServiceCatalog[]> {
+    const tenantId = getTenantId();
     const [rows] = await pool.query<RowDataPacket[]>(
-      'SELECT * FROM service_catalog WHERE is_active = TRUE ORDER BY display_order ASC, name ASC'
+      'SELECT * FROM service_catalog WHERE is_active = TRUE AND tenant_id = ? ORDER BY display_order ASC, name ASC',
+      [tenantId]
     );
 
     return rows as ServiceCatalog[];
@@ -200,6 +205,7 @@ export class ServiceCatalogRepository {
    * Bulk update display order
    */
   async updateDisplayOrder(updates: { id: number; display_order: number }[]): Promise<boolean> {
+    const tenantId = getTenantId();
     const connection = await pool.getConnection();
     
     try {
@@ -207,8 +213,8 @@ export class ServiceCatalogRepository {
 
       for (const update of updates) {
         await connection.query(
-          'UPDATE service_catalog SET display_order = ? WHERE id = ?',
-          [update.display_order, update.id]
+          'UPDATE service_catalog SET display_order = ? WHERE id = ? AND tenant_id = ?',
+          [update.display_order, update.id, tenantId]
         );
       }
 

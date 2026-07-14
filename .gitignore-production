@@ -1,0 +1,52 @@
+# Production .gitignore additions
+# Add these to your main .gitignore
+
+# Temporary migration scripts (DO NOT DEPLOY)
+run-settings-migration.js
+run-payments-fix.js
+fix-payments-direct.js
+fix-payments-simple.sql
+check-users-table.js
+verify-tables.js
+
+# Old migration folder (use database/migrations instead)
+migrations/
+
+# Test scripts
+test-all-settings-apis.sh
+test-settings-api.sh
+
+# Development dumps
+*.sql.bak
+backup_*.sql
+
+# Environment files (NEVER commit)
+.env
+.env.local
+.env.production
+
+# SSL certificates (provide separately on VPS)
+*.pem
+config/aiven-ca.pem
+
+# Node modules
+node_modules/
+dist/
+
+# Logs
+*.log
+logs/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Uploads (use cloud storage)
+uploads/
+temp/

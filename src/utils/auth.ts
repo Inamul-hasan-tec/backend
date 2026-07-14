@@ -15,6 +15,9 @@ export interface JWTPayload {
   email: string;
   role: string;
   name: string;
+  tenant_id?: number;
+  is_super_admin?: boolean;
+  auth_version: number;
 }
 
 /**
@@ -74,7 +77,7 @@ export function generateToken(payload: JWTPayload): string {
   }
   
   // @ts-ignore - jwt types issue with expiresIn
-  return jwt.sign(payload, secret, { expiresIn: process.env.JWT_EXPIRES_IN || '7d' });
+  return jwt.sign(payload, secret, { expiresIn: process.env.JWT_EXPIRES_IN || '8h' });
 }
 
 /**

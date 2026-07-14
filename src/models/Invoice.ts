@@ -4,7 +4,7 @@
  */
 
 export type InvoiceType = 'tax_invoice' | 'receipt_voucher' | 'credit_note' | 'debit_note';
-export type InvoiceStatus = 'draft' | 'issued' | 'paid' | 'partially_paid' | 'cancelled' | 'void';
+export type InvoiceStatus = 'draft' | 'issued' | 'sent' | 'paid' | 'partially_paid' | 'overdue' | 'cancelled' | 'void';
 export type SupplyType = 'intrastate' | 'interstate';
 
 export interface Invoice {
@@ -87,6 +87,8 @@ export interface InvoiceLineItem {
   quantity: number;
   unit: string;
   unit_price: number;
+  line_subtotal: number;
+  gst_rate: number;
   discount_percentage: number;
   discount_amount: number;
   taxable_value: number;
@@ -180,7 +182,7 @@ export interface PaymentAllocation {
 export interface RecordPaymentDTO {
   payment_date: Date;
   amount: number;
-  payment_mode: 'cash' | 'card' | 'upi' | 'netbanking' | 'cheque' | 'other';
+  payment_mode: 'cash' | 'card' | 'upi' | 'bank_transfer' | 'cheque';
   transaction_reference: string | null;
   notes: string | null;
   allocations: PaymentAllocation[];

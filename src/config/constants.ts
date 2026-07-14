@@ -4,6 +4,7 @@ export const JWT_EXPIRE = '30d';
 
 // User roles
 export const ROLES = {
+  SUPER_ADMIN: 'super_admin',
   ADMIN: 'admin',
   STAFF: 'staff',
   CUSTOMER: 'customer'

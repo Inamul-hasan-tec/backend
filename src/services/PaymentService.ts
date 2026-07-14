@@ -4,16 +4,13 @@
  */
 
 import { PaymentRepository } from '../repositories/PaymentRepository';
-import { BookingRepository } from '../repositories/BookingRepository';
 import { Payment, CreatePaymentDTO } from '../models/Payment';
 
 export class PaymentService {
   private paymentRepo: PaymentRepository;
-  private bookingRepo: BookingRepository;
 
   constructor() {
     this.paymentRepo = new PaymentRepository();
-    this.bookingRepo = new BookingRepository();
   }
 
   /**
@@ -41,29 +38,11 @@ export class PaymentService {
    * Create new payment
    */
   async createPayment(data: CreatePaymentDTO): Promise<number> {
-    // Validate booking exists
-    const booking = await this.bookingRepo.findById(data.booking_id);
-    if (!booking) {
-      throw new Error('Booking not found');
-    }
-
-    // Validate amount
-    if (data.amount <= 0) {
-      throw new Error('Payment amount must be positive');
-    }
-
-    // Create payment
-    const paymentId = await this.paymentRepo.create(data);
-
-    // Update booking balance if needed
-    const totalPaid = await this.paymentRepo.getTotalByBooking(data.booking_id);
-    const balance = booking.total_amount - totalPaid;
-
-    await this.bookingRepo.update(data.booking_id, {
-      advance_amount: totalPaid,
-    });
-
-    return paymentId;
+    const paymentData: CreatePaymentDTO = {
+      ...data,
+      payment_date: data.payment_date ? new Date(data.payment_date) : new Date(),
+    };
+    return this.paymentRepo.createForBooking(paymentData);
   }
 
   /**

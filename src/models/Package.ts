@@ -5,6 +5,9 @@
 
 export interface Package {
   id: number;
+  tenant_id?: number;
+  hall_id?: number | null;
+  hall_name?: string | null;
   name: string;
   base_price: number;
   description?: string;
@@ -15,6 +18,8 @@ export interface Package {
 }
 
 export interface CreatePackageDTO {
+  tenant_id?: number;
+  hall_id?: number | null;
   name: string;
   base_price: number;
   description?: string;
@@ -23,6 +28,8 @@ export interface CreatePackageDTO {
 }
 
 export interface UpdatePackageDTO {
+  tenant_id?: number;
+  hall_id?: number | null;
   name?: string;
   base_price?: number;
   description?: string;
@@ -32,6 +39,7 @@ export interface UpdatePackageDTO {
 
 export interface PackageSearchParams {
   name?: string;
+  hall_id?: number;
   status?: 'active' | 'inactive';
   limit?: number;
   offset?: number;

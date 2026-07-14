@@ -6,6 +6,12 @@
 import nodemailer from 'nodemailer';
 import { format } from 'date-fns';
 
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>'"]/g, (character) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;',
+  }[character] || character));
+}
+
 interface BookingEmailData {
   customer_name: string;
   customer_email: string;
@@ -33,6 +39,23 @@ interface PaymentReminderData {
   days_until_event: number;
 }
 
+interface UserInvitationEmailData {
+  to: string;
+  name: string;
+  inviteUrl: string;
+  expiresInHours: number;
+}
+
+function senderAddress(): string {
+  const configured = process.env.SMTP_FROM?.trim();
+  if (configured) {
+    return configured.includes('<') ? configured : `"Hall Sync" <${configured}>`;
+  }
+
+  const user = process.env.SMTP_USER?.trim();
+  return user ? `"Hall Sync" <${user}>` : '"Hall Sync" <noreply@hallsync.com>';
+}
+
 export class EmailService {
   private transporter: nodemailer.Transporter;
 
@@ -52,6 +75,24 @@ export class EmailService {
     });
   }
 
+  async sendUserInvitation(data: UserInvitationEmailData): Promise<boolean> {
+    if (process.env.SMTP_ENABLED !== 'true') return false;
+    if (!process.env.SMTP_FROM) throw new Error('SMTP_FROM is required for invitation email');
+    await this.transporter.sendMail({
+      from: senderAddress(),
+      to: data.to,
+      subject: 'Set up your Hall Sync account',
+      html: `
+        <h2>Hello ${escapeHtml(data.name)},</h2>
+        <p>You have been invited to join Hall Sync.</p>
+        <p><a href="${escapeHtml(data.inviteUrl)}">Set your password and activate your account</a></p>
+        <p>This one-time link expires in ${data.expiresInHours} hours.</p>
+        <p>If you were not expecting this invitation, ignore this email.</p>
+      `,
+    });
+    return true;
+  }
+
   /**
    * Send booking confirmation email with timeout
    */
@@ -59,8 +100,9 @@ export class EmailService {
     const timeout = 10000; // 10 second timeout
     
     try {
-      // Check if email is enabled
-      if (process.env.SMTP_ENABLED === 'false') {
+      // Check if email is explicitly enabled. Booking should not hang or fail
+      // because SMTP is not configured during pilot setup.
+      if (process.env.SMTP_ENABLED !== 'true') {
         console.log('📧 Email sending disabled via SMTP_ENABLED env var');
         return;
       }
@@ -81,7 +123,7 @@ export class EmailService {
       const dueDateText = format(dueDate, 'MMMM dd, yyyy');
 
       const mailOptions = {
-        from: `"Hall Sync" <${process.env.SMTP_USER || 'noreply@hallsync.com'}>`,
+        from: senderAddress(),
         to: data.customer_email,
         subject: `Booking Confirmed - ${data.hall_name} - ${eventDate}`,
         html: this.getBookingConfirmationTemplate(data, timeSlotText, eventDate, dueDateText),
@@ -106,13 +148,18 @@ export class EmailService {
    */
   async sendPaymentReminder(data: PaymentReminderData): Promise<void> {
     try {
+      if (process.env.SMTP_ENABLED !== 'true') {
+        console.log('📧 Email sending disabled via SMTP_ENABLED env var');
+        return;
+      }
+
       const timeSlotText = data.time_slot === 'morning' ? 'Morning (6AM-12PM)' :
                           data.time_slot === 'afternoon' ? 'Afternoon (12PM-6PM)' :
                           'Night (6PM-12AM)';
       const eventDate = format(new Date(data.event_date), 'MMMM dd, yyyy');
 
       const mailOptions = {
-        from: `"Hall Sync" <${process.env.SMTP_USER || 'noreply@hallsync.com'}>`,
+        from: senderAddress(),
         to: data.customer_email,
         subject: `Payment Reminder - Balance Due ₹${data.balance_amount.toLocaleString('en-IN')}`,
         html: this.getPaymentReminderTemplate(data, timeSlotText, eventDate),

@@ -139,11 +139,11 @@ export const createBooking = asyncHandler(async (req: Request, res: Response) =>
     console.log(`🎉 Booking creation completed in ${Date.now() - startTime}ms`);
     res.status(201).json(successResponse('Booking created successfully', booking));
     
-  } catch (error: any) {
+  } catch (error: unknown) {
+    const bookingError = error instanceof Error ? error : new Error('Unknown booking error');
     console.error('❌ Error creating booking:', {
-      message: error.message,
-      stack: error.stack,
-      body: req.body,
+      message: bookingError.message,
+      stack: bookingError.stack,
       duration: `${Date.now() - startTime}ms`
     });
     throw error; // Let asyncHandler handle it

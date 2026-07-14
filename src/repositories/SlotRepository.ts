@@ -1,14 +1,15 @@
 /**
  * Slot Repository
- * Data access layer for hall availability slots
+ * Data access layer for hall availability slots with Strict Multi-Tenancy via ALS
  */
 
 import { RowDataPacket } from 'mysql2';
-import { BaseRepository } from './BaseRepository';
+import { TenantBaseRepository } from './TenantBaseRepository';
 import { Slot, SlotSearchParams } from '../models/Slot';
 import pool from '../config/db';
+import { getTenantId } from '../utils/tenantContext';
 
-export class SlotRepository extends BaseRepository<Slot> {
+export class SlotRepository extends TenantBaseRepository<Slot> {
   constructor() {
     super('slots');
   }
@@ -17,8 +18,9 @@ export class SlotRepository extends BaseRepository<Slot> {
    * Get slots with filters
    */
   async search(params: SlotSearchParams): Promise<Slot[]> {
-    let sql = `SELECT * FROM ${this.tableName} WHERE 1=1`;
-    const values: any[] = [];
+    const tenantId = getTenantId();
+    let sql = `SELECT * FROM ${this.tableName} WHERE tenant_id = ?`;
+    const values: any[] = [tenantId];
 
     if (params.hall_id) {
       sql += ' AND hall_id = ?';
@@ -50,14 +52,16 @@ export class SlotRepository extends BaseRepository<Slot> {
    * Get available slots for a hall
    */
   async getAvailable(hallId: number, dateFrom: string, dateTo: string): Promise<Slot[]> {
+    const tenantId = getTenantId();
     const sql = `
       SELECT * FROM ${this.tableName}
       WHERE hall_id = ?
       AND slot_date BETWEEN ? AND ?
       AND status = 'available'
+      AND tenant_id = ?
       ORDER BY slot_date ASC
     `;
-    const [rows] = await pool.execute<RowDataPacket[]>(sql, [hallId, dateFrom, dateTo]);
+    const [rows] = await pool.execute<RowDataPacket[]>(sql, [hallId, dateFrom, dateTo, tenantId]);
     return rows as Slot[];
   }
 
@@ -65,14 +69,16 @@ export class SlotRepository extends BaseRepository<Slot> {
    * Check if slot is available
    */
   async isAvailable(hallId: number, date: string): Promise<boolean> {
+    const tenantId = getTenantId();
     const sql = `
       SELECT COUNT(*) as count 
       FROM ${this.tableName}
       WHERE hall_id = ? 
       AND slot_date = ? 
       AND status = 'booked'
+      AND tenant_id = ?
     `;
-    const [rows] = await pool.execute<RowDataPacket[]>(sql, [hallId, date]);
+    const [rows] = await pool.execute<RowDataPacket[]>(sql, [hallId, date, tenantId]);
     return rows[0].count === 0;
   }
 
@@ -80,11 +86,12 @@ export class SlotRepository extends BaseRepository<Slot> {
    * Get slot by hall and date
    */
   async findByHallAndDate(hallId: number, date: string): Promise<Slot | null> {
+    const tenantId = getTenantId();
     const sql = `
       SELECT * FROM ${this.tableName}
-      WHERE hall_id = ? AND slot_date = ?
+      WHERE hall_id = ? AND slot_date = ? AND tenant_id = ?
     `;
-    const [rows] = await pool.execute<RowDataPacket[]>(sql, [hallId, date]);
+    const [rows] = await pool.execute<RowDataPacket[]>(sql, [hallId, date, tenantId]);
     return rows.length > 0 ? (rows[0] as Slot) : null;
   }
 }

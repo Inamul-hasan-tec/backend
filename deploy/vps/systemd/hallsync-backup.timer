@@ -1,0 +1,12 @@
+[Unit]
+Description=Run Hall Sync verified database backup daily
+
+[Timer]
+OnCalendar=*-*-* 02:30:00
+Persistent=true
+RandomizedDelaySec=10m
+Unit=hallsync-backup.service
+
+[Install]
+WantedBy=timers.target
+

@@ -1,15 +1,16 @@
 /**
  * Package Repository
- * Data access layer for packages
+ * Data access layer for packages with Strict Multi-Tenancy via ALS
  */
 
 import { RowDataPacket } from 'mysql2';
-import { BaseRepository } from './BaseRepository';
+import { TenantBaseRepository } from './TenantBaseRepository';
 import { Package, PackageSearchParams } from '../models/Package';
 import pool from '../config/db';
 import { validateLimit, validateOffset } from '../utils/validators';
+import { getTenantId } from '../utils/tenantContext';
 
-export class PackageRepository extends BaseRepository<Package> {
+export class PackageRepository extends TenantBaseRepository<Package> {
   constructor() {
     super('packages');
   }
@@ -18,22 +19,32 @@ export class PackageRepository extends BaseRepository<Package> {
    * Search packages with filters
    */
   async search(params: PackageSearchParams): Promise<Package[]> {
-    let sql = `SELECT * FROM ${this.tableName} WHERE 1=1`;
-    const values: any[] = [];
+    const tenantId = getTenantId();
+    let sql = `
+      SELECT p.*, h.name AS hall_name
+      FROM ${this.tableName} p
+      LEFT JOIN halls h ON h.id = p.hall_id AND h.tenant_id = p.tenant_id
+      WHERE p.tenant_id = ?
+    `;
+    const values: any[] = [tenantId];
 
     if (params.name) {
-      sql += ' AND name LIKE ?';
+      sql += ' AND p.name LIKE ?';
       values.push(`%${params.name}%`);
     }
 
+    if (params.hall_id) {
+      sql += ' AND (p.hall_id IS NULL OR p.hall_id = ?)';
+      values.push(params.hall_id);
+    }
+
     if (params.status) {
-      sql += ' AND status = ?';
+      sql += ' AND p.status = ?';
       values.push(params.status);
     }
 
-    sql += ' ORDER BY base_price ASC';
+    sql += ' ORDER BY p.hall_id IS NOT NULL DESC, p.base_price ASC';
 
-    // Use template literals for LIMIT/OFFSET as MySQL doesn't support them as parameters
     if (params.limit) {
       const validLimit = validateLimit(params.limit, 10, 100);
       sql += ` LIMIT ${validLimit}`;
@@ -52,12 +63,34 @@ export class PackageRepository extends BaseRepository<Package> {
    * Get active packages
    */
   async getActive(): Promise<Package[]> {
+    const tenantId = getTenantId();
     const sql = `
-      SELECT * FROM ${this.tableName} 
-      WHERE status = 'active'
-      ORDER BY base_price ASC
+      SELECT p.*, h.name AS hall_name
+      FROM ${this.tableName} p
+      LEFT JOIN halls h ON h.id = p.hall_id AND h.tenant_id = p.tenant_id
+      WHERE p.status = 'active' AND p.tenant_id = ?
+      ORDER BY p.hall_id IS NOT NULL DESC, p.base_price ASC
     `;
-    const [rows] = await pool.execute<RowDataPacket[]>(sql);
+    const [rows] = await pool.execute<RowDataPacket[]>(sql, [tenantId]);
+    return rows as Package[];
+  }
+
+  /**
+   * Get active packages available for a hall.
+   * Global packages (hall_id NULL) are available for every hall.
+   */
+  async getActiveForHall(hallId: number): Promise<Package[]> {
+    const tenantId = getTenantId();
+    const sql = `
+      SELECT p.*, h.name AS hall_name
+      FROM ${this.tableName} p
+      LEFT JOIN halls h ON h.id = p.hall_id AND h.tenant_id = p.tenant_id
+      WHERE p.status = 'active'
+        AND p.tenant_id = ?
+        AND (p.hall_id IS NULL OR p.hall_id = ?)
+      ORDER BY p.hall_id IS NOT NULL DESC, p.base_price ASC
+    `;
+    const [rows] = await pool.execute<RowDataPacket[]>(sql, [tenantId, hallId]);
     return rows as Package[];
   }
 
@@ -65,19 +98,20 @@ export class PackageRepository extends BaseRepository<Package> {
    * Get popular packages (most booked)
    */
   async getPopular(limit: number = 5): Promise<Package[]> {
-    // Validate and sanitize limit to prevent SQL issues
+    const tenantId = getTenantId();
     const validLimit = validateLimit(limit, 5, 50);
     
     const sql = `
-      SELECT p.*, COUNT(b.id) as booking_count
+      SELECT p.*, h.name AS hall_name, COUNT(b.id) as booking_count
       FROM ${this.tableName} p
-      LEFT JOIN bookings b ON p.id = b.package_id
-      WHERE p.status = 'active'
+      LEFT JOIN halls h ON h.id = p.hall_id AND h.tenant_id = p.tenant_id
+      LEFT JOIN bookings b ON p.id = b.package_id AND b.tenant_id = p.tenant_id
+      WHERE p.status = 'active' AND p.tenant_id = ?
       GROUP BY p.id
       ORDER BY booking_count DESC
       LIMIT ${validLimit}
     `;
-    const [rows] = await pool.execute<RowDataPacket[]>(sql, []);
+    const [rows] = await pool.execute<RowDataPacket[]>(sql, [tenantId]);
     return rows as Package[];
   }
 }

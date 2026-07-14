@@ -21,8 +21,7 @@ export class UserService {
   }
 
   /**
-   * Register a new user
-   * Validates input, checks for duplicates, hashes password, creates user
+   * Register a new user (for public signup / first tenant creation)
    */
   async register(userData: CreateUserDTO): Promise<{
     user: UserResponse;
@@ -54,18 +53,21 @@ export class UserService {
       password: hashedPassword,
     });
 
-    // Get created user (without password)
+    // Get created user
     const user = await this.userRepo.findByIdSafe(userId);
     if (!user) {
       throw new Error('Failed to create user');
     }
 
-    // Generate JWT token
+    // Generate JWT token with tenant info
     const token = generateToken({
       id: user.id,
       email: user.email,
-      role: user.role,
+      role: user.is_super_admin ? 'super_admin' : user.role,
       name: user.name,
+      tenant_id: user.is_super_admin ? undefined : user.tenant_id,
+      is_super_admin: user.is_super_admin,
+      auth_version: user.auth_version,
     });
 
     return {
@@ -76,7 +78,6 @@ export class UserService {
 
   /**
    * Login user
-   * Validates credentials and returns token
    */
   async login(email: string, password: string): Promise<{
     user: UserResponse;
@@ -93,7 +94,7 @@ export class UserService {
       throw new Error('Invalid email or password');
     }
 
-    // Check if user is active
+    // Check if user is active globally (or in the tenant context, handled in repo)
     if (user.status !== 'active') {
       throw new Error('Account is inactive. Please contact administrator.');
     }
@@ -104,16 +105,23 @@ export class UserService {
       throw new Error('Invalid email or password');
     }
 
-    // Generate JWT token
+    // Generate JWT token with full user context
     const token = generateToken({
       id: user.id,
       email: user.email,
-      role: user.role,
+      role: user.is_super_admin ? 'super_admin' : user.role,
       name: user.name,
+      tenant_id: user.is_super_admin ? undefined : user.tenant_id,
+      is_super_admin: user.is_super_admin,
+      auth_version: user.auth_version,
     });
 
     // Return user without password
     const { password: _, ...userWithoutPassword } = user;
+    if (user.is_super_admin) {
+      delete userWithoutPassword.tenant_id;
+      userWithoutPassword.role = 'super_admin';
+    }
 
     return {
       user: userWithoutPassword as UserResponse,
@@ -134,8 +142,7 @@ export class UserService {
    */
   async getActiveUsers(): Promise<UserResponse[]> {
     const users = await this.userRepo.getActive();
-    // Remove passwords from response
-    return users.map(({ password, ...user }) => user) as UserResponse[];
+    return users.map(({ password, ...user }: any) => user) as UserResponse[];
   }
 
   /**
@@ -146,31 +153,23 @@ export class UserService {
     currentPassword: string,
     newPassword: string
   ): Promise<void> {
-    // Get user with password
     const user = await this.userRepo.findById(userId);
     if (!user) {
       throw new Error('User not found');
     }
 
-    // Verify current password
-    const isCurrentPasswordValid = await comparePassword(
-      currentPassword,
-      user.password
-    );
+    const isCurrentPasswordValid = await comparePassword(currentPassword, user.password);
     if (!isCurrentPasswordValid) {
       throw new Error('Current password is incorrect');
     }
 
-    // Validate new password
     const passwordValidation = validatePassword(newPassword);
     if (!passwordValidation.isValid) {
       throw new Error(passwordValidation.message || 'Invalid password');
     }
 
-    // Hash new password
     const hashedPassword = await hashPassword(newPassword);
 
-    // Update password
     const updated = await this.userRepo.updatePassword(userId, hashedPassword);
     if (!updated) {
       throw new Error('Failed to update password');
@@ -196,4 +195,61 @@ export class UserService {
       throw new Error('Failed to activate user');
     }
   }
+
+  /**
+   * Get all users for a tenant
+   */
+  async getAllUsersByTenant(): Promise<UserResponse[]> {
+    return await this.userRepo.getAllByTenant();
+  }
+
+  /**
+   * Get user by ID with tenant check
+   */
+  async getUserByIdWithTenant(userId: number): Promise<UserResponse | null> {
+    const user = await this.userRepo.findById(userId);
+    if (!user) {
+      return null;
+    }
+    return user;
+  }
+
+  /**
+   * Update user
+   */
+  async updateUser(userId: number, updateData: Partial<CreateUserDTO>): Promise<UserResponse> {
+    if (updateData.email && !validateEmail(updateData.email)) {
+      throw new Error('Invalid email format');
+    }
+
+    if (updateData.email) {
+      const existingUser = await this.userRepo.findByEmail(updateData.email);
+      if (existingUser && existingUser.id !== userId) {
+        throw new Error('Email already exists');
+      }
+    }
+
+    const updated = await this.userRepo.update(userId, updateData);
+    if (!updated) {
+      throw new Error('Failed to update user');
+    }
+
+    const user = await this.userRepo.findByIdSafe(userId);
+    if (!user) {
+      throw new Error('User not found after update');
+    }
+
+    return user;
+  }
+
+  /**
+   * Delete user
+   */
+  async deleteUser(userId: number): Promise<void> {
+    const deleted = await this.userRepo.delete(userId);
+    if (!deleted) {
+      throw new Error('Failed to delete user');
+    }
+  }
+
 }

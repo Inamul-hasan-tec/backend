@@ -1,25 +1,34 @@
 /**
  * Customer Repository
- * Data access layer for customers
+ * Data access layer for customers with Strict Multi-Tenancy via ALS
  */
 
 import { RowDataPacket } from 'mysql2';
-import { BaseRepository } from './BaseRepository';
+import { TenantBaseRepository } from './TenantBaseRepository';
 import { Customer, CustomerSearchParams } from '../models/Customer';
 import pool from '../config/db';
 import { validateLimit, validateOffset } from '../utils/validators';
+import { getTenantId } from '../utils/tenantContext';
 
-export class CustomerRepository extends BaseRepository<Customer> {
+export class CustomerRepository extends TenantBaseRepository<Customer> {
   constructor() {
     super('customers');
+  }
+
+  /**
+   * Find all customers
+   */
+  async findAllCustomers(limit?: number, offset?: number): Promise<Customer[]> {
+    return this.findAll(limit, offset);
   }
 
   /**
    * Search customers with filters
    */
   async search(params: CustomerSearchParams): Promise<Customer[]> {
-    let sql = `SELECT * FROM ${this.tableName} WHERE 1=1`;
-    const values: any[] = [];
+    const tenantId = getTenantId();
+    let sql = `SELECT * FROM ${this.tableName} WHERE tenant_id = ?`;
+    const values: any[] = [tenantId];
 
     if (params.name) {
       sql += ' AND name LIKE ?';
@@ -48,7 +57,6 @@ export class CustomerRepository extends BaseRepository<Customer> {
 
     sql += ' ORDER BY created_at DESC';
 
-    // Use template literals for LIMIT/OFFSET as MySQL doesn't support them as parameters
     if (params.limit) {
       const validLimit = validateLimit(params.limit, 10, 100);
       sql += ` LIMIT ${validLimit}`;
@@ -67,8 +75,9 @@ export class CustomerRepository extends BaseRepository<Customer> {
    * Find customer by phone
    */
   async findByPhone(phone: string): Promise<Customer | null> {
-    const sql = `SELECT * FROM ${this.tableName} WHERE phone = ?`;
-    const [rows] = await pool.execute<RowDataPacket[]>(sql, [phone]);
+    const tenantId = getTenantId();
+    const sql = `SELECT * FROM ${this.tableName} WHERE phone = ? AND tenant_id = ?`;
+    const [rows] = await pool.execute<RowDataPacket[]>(sql, [phone, tenantId]);
     return rows.length > 0 ? (rows[0] as Customer) : null;
   }
 
@@ -76,8 +85,9 @@ export class CustomerRepository extends BaseRepository<Customer> {
    * Find customer by email
    */
   async findByEmail(email: string): Promise<Customer | null> {
-    const sql = `SELECT * FROM ${this.tableName} WHERE email = ?`;
-    const [rows] = await pool.execute<RowDataPacket[]>(sql, [email]);
+    const tenantId = getTenantId();
+    const sql = `SELECT * FROM ${this.tableName} WHERE email = ? AND tenant_id = ?`;
+    const [rows] = await pool.execute<RowDataPacket[]>(sql, [email, tenantId]);
     return rows.length > 0 ? (rows[0] as Customer) : null;
   }
 
@@ -85,16 +95,16 @@ export class CustomerRepository extends BaseRepository<Customer> {
    * Get recent customers
    */
   async getRecent(limit: number = 10): Promise<Customer[]> {
-    // Validate and sanitize limit to prevent SQL issues
+    const tenantId = getTenantId();
     const validLimit = validateLimit(limit, 10, 100);
     
     const sql = `
       SELECT * FROM ${this.tableName} 
-      WHERE status = 'active'
+      WHERE status = 'active' AND tenant_id = ?
       ORDER BY created_at DESC 
       LIMIT ${validLimit}
     `;
-    const [rows] = await pool.execute<RowDataPacket[]>(sql, []);
+    const [rows] = await pool.execute<RowDataPacket[]>(sql, [tenantId]);
     return rows as Customer[];
   }
 
@@ -107,20 +117,26 @@ export class CustomerRepository extends BaseRepository<Customer> {
     inactive: number;
     byEventType: Record<string, number>;
   }> {
+    const tenantId = getTenantId();
+    
     const [totalRows] = await pool.execute<RowDataPacket[]>(
-      `SELECT COUNT(*) as count FROM ${this.tableName}`
+      `SELECT COUNT(*) as count FROM ${this.tableName} WHERE tenant_id = ?`,
+      [tenantId]
     );
 
     const [activeRows] = await pool.execute<RowDataPacket[]>(
-      `SELECT COUNT(*) as count FROM ${this.tableName} WHERE status = 'active'`
+      `SELECT COUNT(*) as count FROM ${this.tableName} WHERE status = 'active' AND tenant_id = ?`,
+      [tenantId]
     );
 
     const [inactiveRows] = await pool.execute<RowDataPacket[]>(
-      `SELECT COUNT(*) as count FROM ${this.tableName} WHERE status = 'inactive'`
+      `SELECT COUNT(*) as count FROM ${this.tableName} WHERE status = 'inactive' AND tenant_id = ?`,
+      [tenantId]
     );
 
     const [eventTypeRows] = await pool.execute<RowDataPacket[]>(
-      `SELECT event_type, COUNT(*) as count FROM ${this.tableName} GROUP BY event_type`
+      `SELECT event_type, COUNT(*) as count FROM ${this.tableName} WHERE tenant_id = ? GROUP BY event_type`,
+      [tenantId]
     );
 
     const byEventType: Record<string, number> = {};

@@ -1,26 +1,41 @@
 /**
  * Payment Routes
  * API endpoints for payment management
+ * Protected with RBAC permissions
  */
 
 import { Router } from 'express';
 import * as paymentController from '../controllers/paymentController';
+import { requirePermission } from '../middleware/permissionMiddleware';
+import { Permission } from '../types/permissions';
 
 const router = Router();
 
-// Get all payments
-router.get('/', paymentController.getPayments);
+// GET routes - Require VIEW permission
+router.get('/', 
+  requirePermission(Permission.PAYMENT_LIST),
+  paymentController.getPayments
+);
 
-// Get payment statistics
-router.get('/stats', paymentController.getPaymentStats);
+router.get('/stats', 
+  requirePermission(Permission.PAYMENT_VIEW),
+  paymentController.getPaymentStats
+);
 
-// Get payments for a booking
-router.get('/booking/:bookingId', paymentController.getPaymentsByBooking);
+router.get('/booking/:bookingId', 
+  requirePermission(Permission.PAYMENT_LIST),
+  paymentController.getPaymentsByBooking
+);
 
-// Get payment by ID
-router.get('/:id', paymentController.getPaymentById);
+router.get('/:id', 
+  requirePermission(Permission.PAYMENT_VIEW),
+  paymentController.getPaymentById
+);
 
-// Create new payment
-router.post('/', paymentController.createPayment);
+// POST routes - Require CREATE permission
+router.post('/', 
+  requirePermission(Permission.PAYMENT_CREATE),
+  paymentController.createPayment
+);
 
 export default router;

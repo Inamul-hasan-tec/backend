@@ -17,8 +17,9 @@ const packageService = new PackageService();
 export const getAllPackages = asyncHandler(async (req: Request, res: Response) => {
   const limit = req.query.limit ? parseInt(req.query.limit as string) : undefined;
   const offset = req.query.offset ? parseInt(req.query.offset as string) : undefined;
+  const hallId = req.query.hall_id ? parseInt(req.query.hall_id as string, 10) : undefined;
 
-  const packages = await packageService.getAllPackages(limit, offset);
+  const packages = await packageService.searchPackages({ hall_id: hallId, limit, offset });
   res.json(successResponse('Packages retrieved successfully', packages));
 });
 
@@ -29,6 +30,7 @@ export const getAllPackages = asyncHandler(async (req: Request, res: Response) =
 export const searchPackages = asyncHandler(async (req: Request, res: Response) => {
   const params = {
     name: req.query.name as string,
+    hall_id: req.query.hall_id ? parseInt(req.query.hall_id as string, 10) : undefined,
     status: req.query.status as any,
     limit: req.query.limit ? parseInt(req.query.limit as string) : undefined,
     offset: req.query.offset ? parseInt(req.query.offset as string) : undefined,
@@ -43,7 +45,10 @@ export const searchPackages = asyncHandler(async (req: Request, res: Response) =
  * Get active packages
  */
 export const getActivePackages = asyncHandler(async (req: Request, res: Response) => {
-  const packages = await packageService.getActivePackages();
+  const hallId = req.query.hall_id ? parseInt(req.query.hall_id as string, 10) : undefined;
+  const packages = hallId
+    ? await packageService.getActivePackagesForHall(hallId)
+    : await packageService.getActivePackages();
   res.json(successResponse('Active packages retrieved', packages));
 });
 

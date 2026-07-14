@@ -50,7 +50,7 @@ export class BaseRepository<T> {
    */
   async create(data: Partial<T>): Promise<number> {
     const fields = Object.keys(data);
-    const values = Object.values(data);
+    const values = Object.values(data) as any[];
     const placeholders = fields.map(() => '?').join(', ');
 
     const sql = `INSERT INTO ${this.tableName} (${fields.join(', ')}) VALUES (${placeholders})`;
@@ -63,7 +63,7 @@ export class BaseRepository<T> {
    */
   async update(id: number, data: Partial<T>): Promise<boolean> {
     const fields = Object.keys(data);
-    const values = Object.values(data);
+    const values = Object.values(data) as any[];
     const setClause = fields.map(field => `${field} = ?`).join(', ');
 
     const sql = `UPDATE ${this.tableName} SET ${setClause} WHERE id = ?`;

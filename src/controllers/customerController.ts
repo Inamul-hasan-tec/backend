@@ -102,6 +102,14 @@ export const updateCustomer = asyncHandler(async (req: Request, res: Response) =
  */
 export const deleteCustomer = asyncHandler(async (req: Request, res: Response) => {
   const id = parseInt(req.params.id);
-  await customerService.deleteCustomer(id);
-  res.json(successResponse('Customer deleted successfully'));
+  try {
+    await customerService.deleteCustomer(id);
+    res.json(successResponse('Customer deleted successfully'));
+  } catch (error: any) {
+    if (error.message && error.message.includes('foreign key constraint')) {
+      res.status(400).json(errorResponse('Cannot delete customer: Customer has associated bookings. Please delete bookings first or deactivate the customer instead.'));
+    } else {
+      throw error;
+    }
+  }
 });

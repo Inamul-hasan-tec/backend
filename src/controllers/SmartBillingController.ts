@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { SmartBillingCalculator } from '../utils/SmartBillingCalculator';
 import pool from '../config/db';
 import { RowDataPacket } from 'mysql2';
+import { getTenantId } from '../utils/tenantContext';
 
 export class SmartBillingController {
   /**
@@ -86,6 +87,7 @@ export class SmartBillingController {
    */
   static async getConfig(req: Request, res: Response) {
     try {
+      const tenantId = getTenantId();
       const [rows] = await pool.query<RowDataPacket[]>(
         `SELECT 
           billing_mode,
@@ -93,7 +95,9 @@ export class SmartBillingController {
           enable_tax_optimization,
           annual_turnover
         FROM business_config
-        LIMIT 1`
+        WHERE tenant_id = ?
+        LIMIT 1`,
+        [tenantId]
       );
 
       if (rows.length === 0) {
@@ -123,6 +127,7 @@ export class SmartBillingController {
    */
   static async updateConfig(req: Request, res: Response) {
     try {
+      const tenantId = getTenantId();
       const {
         billing_mode,
         composite_scheme_enabled,
@@ -135,8 +140,8 @@ export class SmartBillingController {
              composite_scheme_enabled = ?,
              enable_tax_optimization = ?,
              updated_at = NOW()
-         WHERE id = 1`,
-        [billing_mode, composite_scheme_enabled, enable_tax_optimization]
+         WHERE tenant_id = ?`,
+        [billing_mode, composite_scheme_enabled, enable_tax_optimization, tenantId]
       );
 
       res.json({
@@ -159,6 +164,7 @@ export class SmartBillingController {
    */
   static async getTaxReport(req: Request, res: Response) {
     try {
+      const tenantId = getTenantId();
       const { from_date, to_date } = req.query;
 
       let query = `
@@ -170,10 +176,10 @@ export class SmartBillingController {
           SUM(tax_savings) as total_tax_saved,
           AVG(effective_gst_rate) as avg_effective_rate
         FROM invoices
-        WHERE status != 'cancelled'
+        WHERE tenant_id = ? AND status != 'cancelled'
       `;
 
-      const params: any[] = [];
+      const params: any[] = [tenantId];
 
       if (from_date) {
         query += ' AND invoice_date >= ?';
@@ -225,6 +231,7 @@ export class SmartBillingController {
    */
   static async getReimbursementServices(req: Request, res: Response) {
     try {
+      const tenantId = getTenantId();
       const [rows] = await pool.query<RowDataPacket[]>(
         `SELECT 
           service_code,
@@ -235,8 +242,9 @@ export class SmartBillingController {
           is_taxable,
           tax_exemption_reason
         FROM service_catalog
-        WHERE is_taxable = 0 AND is_active = 1
-        ORDER BY name`
+        WHERE tenant_id = ? AND is_taxable = 0 AND is_active = 1
+        ORDER BY name`,
+        [tenantId]
       );
 
       res.json({

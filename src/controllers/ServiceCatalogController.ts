@@ -20,7 +20,7 @@ export class ServiceCatalogController {
         search: req.query.search as string,
       };
 
-      const services = await ServiceCatalogRepository.getAll(filters);
+      const services = await ServiceCatalogRepository.getAllServices(filters);
 
       res.json({
         success: true,
@@ -91,7 +91,7 @@ export class ServiceCatalogController {
   async getServiceById(req: Request, res: Response): Promise<void> {
     try {
       const { id } = req.params;
-      const service = await ServiceCatalogRepository.getById(parseInt(id));
+      const service = await ServiceCatalogRepository.findById(parseInt(id));
 
       if (!service) {
         res.status(404).json({
@@ -152,7 +152,7 @@ export class ServiceCatalogController {
       }
 
       const serviceId = await ServiceCatalogRepository.create(serviceData);
-      const service = await ServiceCatalogRepository.getById(serviceId);
+      const service = await ServiceCatalogRepository.findById(serviceId);
 
       res.status(201).json({
         success: true,
@@ -199,7 +199,7 @@ export class ServiceCatalogController {
         return;
       }
 
-      const service = await ServiceCatalogRepository.getById(parseInt(id));
+      const service = await ServiceCatalogRepository.findById(parseInt(id));
 
       res.json({
         success: true,
