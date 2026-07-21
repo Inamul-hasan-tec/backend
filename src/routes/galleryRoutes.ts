@@ -2,9 +2,33 @@ import express from 'express';
 import multer from 'multer';
 import GalleryController from '../controllers/GalleryController';
 import { requirePermission } from '../middleware/permissionMiddleware';
+import { TenantRequest } from '../middleware/tenantMiddleware';
 import { Permission } from '../types/permissions';
+import { runWithTenantContext } from '../utils/tenantContext';
 
 const router = express.Router();
+
+const bindTenantContext = (
+  req: TenantRequest,
+  res: express.Response,
+  next: express.NextFunction
+) => {
+  if (!req.user || !req.tenantId) {
+    return res.status(403).json({
+      success: false,
+      error: 'Tenant context is required for gallery operations.',
+    });
+  }
+
+  return runWithTenantContext(
+    {
+      tenantId: req.tenantId,
+      userId: req.user.id,
+      role: req.user.role,
+    },
+    next
+  );
+};
 
 // Configure multer for memory storage
 const upload = multer({
@@ -27,6 +51,7 @@ const upload = multer({
 router.get(
   '/:hallId/gallery',
   requirePermission(Permission.HALL_VIEW),
+  bindTenantContext,
   GalleryController.getHallGallery
 );
 
@@ -34,6 +59,7 @@ router.get(
 router.get(
   '/:hallId/gallery/featured',
   requirePermission(Permission.HALL_VIEW),
+  bindTenantContext,
   GalleryController.getFeaturedImages
 );
 
@@ -41,6 +67,7 @@ router.get(
 router.get(
   '/:hallId/gallery/stats',
   requirePermission(Permission.HALL_VIEW),
+  bindTenantContext,
   GalleryController.getGalleryStats
 );
 
@@ -49,6 +76,7 @@ router.post(
   '/:hallId/gallery',
   requirePermission(Permission.HALL_UPDATE),
   upload.array('images', 10), // Allow up to 10 images at once
+  bindTenantContext,
   GalleryController.uploadImages
 );
 
@@ -56,6 +84,7 @@ router.post(
 router.get(
   '/gallery/:id',
   requirePermission(Permission.HALL_VIEW),
+  bindTenantContext,
   GalleryController.getImageById
 );
 
@@ -63,6 +92,7 @@ router.get(
 router.put(
   '/gallery/:id',
   requirePermission(Permission.HALL_UPDATE),
+  bindTenantContext,
   GalleryController.updateImage
 );
 
@@ -70,6 +100,7 @@ router.put(
 router.delete(
   '/gallery/:id',
   requirePermission(Permission.HALL_DELETE),
+  bindTenantContext,
   GalleryController.deleteImage
 );
 
@@ -77,6 +108,7 @@ router.delete(
 router.put(
   '/gallery/reorder',
   requirePermission(Permission.HALL_UPDATE),
+  bindTenantContext,
   GalleryController.reorderImages
 );
 
@@ -84,6 +116,7 @@ router.put(
 router.put(
   '/gallery/:id/featured',
   requirePermission(Permission.HALL_UPDATE),
+  bindTenantContext,
   GalleryController.setFeaturedImage
 );
 
@@ -91,6 +124,7 @@ router.put(
 router.post(
   '/gallery/bulk-delete',
   requirePermission(Permission.HALL_DELETE),
+  bindTenantContext,
   GalleryController.bulkDeleteImages
 );
 
