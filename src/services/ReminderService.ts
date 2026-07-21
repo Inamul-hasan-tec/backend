@@ -23,6 +23,17 @@ interface BookingWithBalance {
   days_until_event: number;
 }
 
+interface ReminderSendResult {
+  booking_id: string;
+  customer_name: string;
+  customer_phone: string;
+  customer_email: string;
+  email_sent: boolean;
+  email_skipped?: boolean;
+  email_error?: string;
+  manual_fallback_available: boolean;
+}
+
 export class ReminderService {
   private emailService: EmailService;
 
@@ -100,7 +111,7 @@ export class ReminderService {
   /**
    * Send payment reminder for a specific booking
    */
-  async sendPaymentReminder(bookingId: number): Promise<void> {
+  async sendPaymentReminder(bookingId: number): Promise<ReminderSendResult> {
     const tenantId = getTenantId();
     // Get booking details
     const sql = `
@@ -136,11 +147,20 @@ export class ReminderService {
     }
 
     if (!booking.customer_email) {
-      throw new Error('Customer email not found');
+      return {
+        booking_id: booking.booking_id,
+        customer_name: booking.customer_name,
+        customer_phone: booking.customer_phone,
+        customer_email: '',
+        email_sent: false,
+        email_skipped: true,
+        email_error: 'Customer email is missing. Use WhatsApp/manual reminder.',
+        manual_fallback_available: Boolean(booking.customer_phone),
+      };
     }
 
     // Send email reminder
-    await this.emailService.sendPaymentReminder({
+    const emailResult = await this.emailService.sendPaymentReminder({
       customer_email: booking.customer_email,
       customer_name: booking.customer_name,
       booking_id: booking.booking_id,
@@ -154,7 +174,20 @@ export class ReminderService {
     });
 
     // Log reminder sent
-    await this.logReminder(bookingId, 'manual');
+    if (emailResult.sent) {
+      await this.logReminder(bookingId, 'manual');
+    }
+
+    return {
+      booking_id: booking.booking_id,
+      customer_name: booking.customer_name,
+      customer_phone: booking.customer_phone,
+      customer_email: booking.customer_email,
+      email_sent: emailResult.sent,
+      email_skipped: emailResult.skipped,
+      email_error: emailResult.sent ? undefined : emailResult.reason,
+      manual_fallback_available: Boolean(booking.customer_phone),
+    };
   }
 
   /**
@@ -169,7 +202,7 @@ export class ReminderService {
     for (const booking of bookings) {
       try {
         if (booking.customer_email) {
-          await this.emailService.sendPaymentReminder({
+          const emailResult = await this.emailService.sendPaymentReminder({
             customer_email: booking.customer_email,
             customer_name: booking.customer_name,
             booking_id: booking.booking_id,
@@ -182,8 +215,12 @@ export class ReminderService {
             days_until_event: booking.days_until_event,
           });
 
-          await this.logReminder(booking.id, 'automatic');
-          sent++;
+          if (emailResult.sent) {
+            await this.logReminder(booking.id, 'automatic');
+            sent++;
+          } else {
+            failed++;
+          }
         }
       } catch (error) {
         console.error(`Failed to send reminder for booking ${booking.booking_id}:`, error);

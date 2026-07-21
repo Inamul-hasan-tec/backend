@@ -34,11 +34,14 @@ export const sendPaymentReminder = asyncHandler(async (req: Request, res: Respon
     return;
   }
 
-  await reminderService.sendPaymentReminder(bookingId);
+  const result = await reminderService.sendPaymentReminder(bookingId);
 
-  res.json({
+  res.status(result.email_sent ? 200 : 202).json({
     success: true,
-    message: 'Payment reminder sent successfully'
+    message: result.email_sent
+      ? 'Payment reminder email sent successfully'
+      : 'Email reminder could not be sent. Use WhatsApp/manual reminder while SMTP is fixed.',
+    data: result,
   });
 });
 

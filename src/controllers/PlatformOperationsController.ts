@@ -3,11 +3,7 @@ import path from 'path';
 import { Request, Response } from 'express';
 import { RowDataPacket } from 'mysql2';
 import pool from '../config/db';
-
-function configured(name: string): boolean {
-  const value = String(process.env[name] || '').trim();
-  return Boolean(value) && !/replace-|your-|example|localhost/i.test(value);
-}
+import { productionIntegrationsReadiness } from '../utils/integrationReadiness';
 
 export class PlatformOperationsController {
   async overview(_req: Request, res: Response): Promise<void> {
@@ -84,21 +80,17 @@ export class PlatformOperationsController {
       } catch {
         heartbeat = null;
       }
+      const integrations = productionIntegrationsReadiness();
 
       res.json({
         success: true,
         data: {
           api: { status: 'healthy' },
           database: { status: 'healthy', tls: process.env.DB_SSL === 'true' },
-          storage: { status: configured('CLOUDINARY_CLOUD_NAME') ? 'configured' : 'missing' },
-          email: { status: process.env.SMTP_ENABLED === 'true' && configured('SMTP_FROM') ? 'configured' : 'missing' },
-          error_monitoring: { status: configured('ERROR_MONITORING_DSN') ? 'configured' : 'missing' },
-          uptime_monitoring: {
-            status:
-              configured('UPTIME_MONITOR_HEALTH_URL') && configured('UPTIME_MONITOR_FRONTEND_URL')
-                ? 'configured'
-                : 'missing',
-          },
+          storage: integrations.cloudinary,
+          email: integrations.smtp,
+          error_monitoring: integrations.error_monitoring,
+          uptime_monitoring: integrations.uptime_monitoring,
           backups: {
             status: heartbeat?.status === 'success' ? 'healthy' : 'not_active',
             recorded_at: heartbeat?.recorded_at || null,

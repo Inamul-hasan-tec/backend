@@ -8,10 +8,10 @@ store, never in Git.
 
 | Value | Current value | Status |
 | --- | --- | --- |
-| Frontend app domain | `https://app.hallsync.in` | `[x] DECIDED` |
+| Frontend app domain | `https://hallsync.in` | `[x] DECIDED` |
 | API domain | `https://api.hallsync.in` | `[x] DECIDED` |
 | VPS public IP | `72.62.230.143` | `[x] DECIDED` |
-| DNS A record for app domain | `app.hallsync.in -> 72.62.230.143` | `[ ] TODO` |
+| DNS A record for app domain | `hallsync.in -> 72.62.230.143` | `[ ] TODO` |
 | DNS A record for API domain | `api.hallsync.in -> 72.62.230.143` | `[ ] TODO` |
 | HTTPS certificate email | founder/operator email | `[ ] TODO` |
 
@@ -21,8 +21,9 @@ store, never in Git.
 | --- | --- |
 | `NODE_ENV` | `production` |
 | `PORT` | Usually `5000` behind Nginx |
-| `CORS_ORIGIN` | `https://app.hallsync.in` |
-| `FRONTEND_URL` | `https://app.hallsync.in` |
+| `CORS_ORIGIN` | `https://hallsync.in` |
+| `FRONTEND_URL` / `PUBLIC_APP_URL` | `https://hallsync.in` |
+| `PUBLIC_API_BASE_URL` | `https://api.hallsync.in` |
 | `JWT_SECRET` | New generated secret after rotating old historical value |
 | `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` | Production database credentials |
 | `DB_SSL_CA_PATH` | Empty for local VPS MySQL; use Unix/localhost access and firewall MySQL from public internet |

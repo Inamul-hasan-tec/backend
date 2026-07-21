@@ -20,7 +20,7 @@ Target shape:
 Point these records to the VPS public IP:
 
 ```text
-app.hallsync.in  A  72.62.230.143
+hallsync.in      A  72.62.230.143
 api.hallsync.in  A  72.62.230.143
 ```
 
@@ -71,8 +71,9 @@ Do not paste secrets into Git, chat, screenshots, or docs.
 Minimum production values that must be real:
 
 - `NODE_ENV=production`
-- `CORS_ORIGIN=https://app.hallsync.in`
-- `FRONTEND_URL=https://app.hallsync.in`
+- `CORS_ORIGIN=https://hallsync.in`
+- `FRONTEND_URL=https://hallsync.in`
+- `PUBLIC_API_BASE_URL=https://api.hallsync.in`
 - `JWT_SECRET=<new long random value>`
 - database host/user/password/name/SSL CA
 - `SMTP_*`
@@ -133,7 +134,7 @@ sudo systemctl reload nginx
 Then issue HTTPS certificates:
 
 ```bash
-sudo certbot --nginx -d app.hallsync.in -d api.hallsync.in
+sudo certbot --nginx -d hallsync.in -d www.hallsync.in -d api.hallsync.in
 ```
 
 After Certbot, run `sudo nginx -t` and `sudo systemctl reload nginx`.
@@ -154,7 +155,7 @@ npm run production:backup:verify
 From your machine:
 
 ```bash
-curl -I https://app.hallsync.in
+curl -I https://hallsync.in
 curl https://api.hallsync.in/api/health
 ```
 

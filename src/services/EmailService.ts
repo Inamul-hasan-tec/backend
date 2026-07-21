@@ -5,6 +5,7 @@
 
 import nodemailer from 'nodemailer';
 import { format } from 'date-fns';
+import { smtpReadiness } from '../utils/integrationReadiness';
 
 function escapeHtml(value: string): string {
   return value.replace(/[&<>'"]/g, (character) => ({
@@ -39,6 +40,13 @@ interface PaymentReminderData {
   days_until_event: number;
 }
 
+export interface EmailSendResult {
+  sent: boolean;
+  skipped?: boolean;
+  reason?: string;
+  providerCode?: string | number;
+}
+
 interface UserInvitationEmailData {
   to: string;
   name: string;
@@ -56,6 +64,20 @@ function senderAddress(): string {
   return user ? `"Hall Sync" <${user}>` : '"Hall Sync" <noreply@hallsync.com>';
 }
 
+function sanitizeEmailError(error: any): string {
+  const response = String(error?.response || error?.message || 'Email provider rejected the request');
+  if (/535|authentication failed|invalid login/i.test(response)) {
+    return 'SMTP authentication failed. Check Brevo SMTP login/key and authorized VPS IP.';
+  }
+  if (/sender|from|domain|not verified|unauthorized/i.test(response)) {
+    return 'SMTP sender/domain is not verified or authorized.';
+  }
+  if (/timeout|etimedout|econnrefused|enotfound/i.test(response)) {
+    return 'SMTP provider connection failed. Check host, port, firewall, and provider status.';
+  }
+  return response.replace(/(password|pass|token|secret|key)=\S+/gi, '$1=[REDACTED]');
+}
+
 export class EmailService {
   private transporter: nodemailer.Transporter;
 
@@ -67,7 +89,7 @@ export class EmailService {
     this.transporter = nodemailer.createTransport({
       host: process.env.SMTP_HOST || 'smtp.gmail.com',
       port: parseInt(process.env.SMTP_PORT || '587'),
-      secure: false, // true for 465, false for other ports
+      secure: process.env.SMTP_SECURE === 'true', // true for 465, false for 587
       auth: {
         user: process.env.SMTP_USER || 'your-email@gmail.com',
         pass: process.env.SMTP_PASS || 'your-app-password',
@@ -75,9 +97,16 @@ export class EmailService {
     });
   }
 
+  private canSendEmail(action: string): { ok: boolean; reason?: string } {
+    const readiness = smtpReadiness();
+    if (readiness.status === 'configured') return { ok: true };
+
+    console.warn(`📧 Skipping ${action}: ${readiness.message}`);
+    return { ok: false, reason: readiness.message };
+  }
+
   async sendUserInvitation(data: UserInvitationEmailData): Promise<boolean> {
-    if (process.env.SMTP_ENABLED !== 'true') return false;
-    if (!process.env.SMTP_FROM) throw new Error('SMTP_FROM is required for invitation email');
+    if (!this.canSendEmail('user invitation email').ok) return false;
     await this.transporter.sendMail({
       from: senderAddress(),
       to: data.to,
@@ -102,8 +131,7 @@ export class EmailService {
     try {
       // Check if email is explicitly enabled. Booking should not hang or fail
       // because SMTP is not configured during pilot setup.
-      if (process.env.SMTP_ENABLED !== 'true') {
-        console.log('📧 Email sending disabled via SMTP_ENABLED env var');
+      if (!this.canSendEmail('booking confirmation email').ok) {
         return;
       }
 
@@ -146,11 +174,11 @@ export class EmailService {
   /**
    * Send payment reminder email
    */
-  async sendPaymentReminder(data: PaymentReminderData): Promise<void> {
+  async sendPaymentReminder(data: PaymentReminderData): Promise<EmailSendResult> {
     try {
-      if (process.env.SMTP_ENABLED !== 'true') {
-        console.log('📧 Email sending disabled via SMTP_ENABLED env var');
-        return;
+      const readiness = this.canSendEmail('payment reminder email');
+      if (!readiness.ok) {
+        return { sent: false, skipped: true, reason: readiness.reason };
       }
 
       const timeSlotText = data.time_slot === 'morning' ? 'Morning (6AM-12PM)' :
@@ -167,9 +195,15 @@ export class EmailService {
 
       await this.transporter.sendMail(mailOptions);
       console.log(`✅ Payment reminder email sent to ${data.customer_email}`);
-    } catch (error) {
+      return { sent: true };
+    } catch (error: any) {
       console.error('❌ Error sending payment reminder email:', error);
-      throw error;
+      // Payment reminder dispatch should not break the reminders screen.
+      return {
+        sent: false,
+        reason: sanitizeEmailError(error),
+        providerCode: error?.code || error?.responseCode,
+      };
     }
   }
 
