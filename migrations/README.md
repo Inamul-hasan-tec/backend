@@ -35,6 +35,7 @@ Current platform migrations:
 - `313_hall_scoped_packages.sql`
 - `314_discount_template_tenant_scope.sql`
 - `315_payment_machine.sql`
+- `316_hall_gallery.sql`
 
 For the distinction between tracked migrations, legacy migration history,
 `schema_v2.sql`, backups, and restore drills, read `../docs/DATABASE.md`.
