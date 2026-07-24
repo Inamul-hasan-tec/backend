@@ -19,6 +19,9 @@ function bool(name) {
 }
 
 function resolveDbSSL() {
+  const dbHost = String(process.env.DB_HOST || '').trim().toLowerCase();
+  const localHosts = new Set(['127.0.0.1', 'localhost', '::1']);
+  const isLocalDatabase = localHosts.has(dbHost);
   const sslMode = process.env.DB_SSL_MODE || process.env['SSL Mode'] || '';
   const enabled =
     bool('DB_SSL') ||
@@ -31,6 +34,7 @@ function resolveDbSSL() {
 
   return {
     enabled,
+    isLocalDatabase,
     caPath,
     caExists: enabled ? fs.existsSync(path.resolve(process.cwd(), caPath)) : false,
   };
@@ -68,7 +72,13 @@ async function main() {
     isSet('CORS_ORIGIN') && !/localhost|127\.0\.0\.1/i.test(process.env.CORS_ORIGIN),
     process.env.CORS_ORIGIN || '<missing>'
   );
-  check(checks, 'blocker', 'Database SSL enabled', dbSSL.enabled, dbSSL.enabled ? 'enabled' : 'disabled');
+  check(
+    checks,
+    'blocker',
+    'Database transport is protected',
+    dbSSL.enabled || dbSSL.isLocalDatabase,
+    dbSSL.enabled ? 'ssl=enabled' : dbSSL.isLocalDatabase ? 'local loopback database; ssl not required' : 'remote database without ssl'
+  );
   check(checks, 'blocker', 'Database SSL CA file exists', !dbSSL.enabled || dbSSL.caExists, dbSSL.caPath);
   check(checks, 'warning', 'SMTP enabled', bool('SMTP_ENABLED'), process.env.SMTP_ENABLED || '<unset>');
   check(
