@@ -12,12 +12,13 @@ import routes from './routes';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler';
 import { requestLogger } from './middleware/logger';
 import { installStructuredConsoleBridge, logger } from './utils/logger';
-import { captureError, isEnabled as isMonitoringEnabled } from './utils/errorMonitor';
+import { captureError, initErrorMonitor, isEnabled as isMonitoringEnabled } from './utils/errorMonitor';
 import { productionIntegrationsReadiness } from './utils/integrationReadiness';
 
 // Load environment variables
 dotenv.config();
 installStructuredConsoleBridge();
+initErrorMonitor();
 
 // Create Express app
 const app: Application = express();
