@@ -407,18 +407,18 @@ export class SettingsService {
         daily_summary: true,
       },
       sms: {
-        booking_created: true,
-        booking_updated: true,
-        booking_cancelled: true,
-        payment_received: true,
-        payment_reminder: true,
+        booking_created: false,
+        booking_updated: false,
+        booking_cancelled: false,
+        payment_received: false,
+        payment_reminder: false,
       },
       whatsapp: {
-        booking_created: true,
-        booking_updated: true,
-        booking_cancelled: true,
-        payment_received: true,
-        payment_reminder: true,
+        booking_created: false,
+        booking_updated: false,
+        booking_cancelled: false,
+        payment_received: false,
+        payment_reminder: false,
       }
     };
 
@@ -478,7 +478,7 @@ export class SettingsService {
           tenant_id: tenantId,
           channel,
           event_type: event,
-          enabled: true
+          enabled: channel === 'email'
         });
       }
     }
