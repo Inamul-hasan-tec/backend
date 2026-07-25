@@ -59,6 +59,7 @@ interface AddTeamMemberData {
 interface SubmitPaymentData {
   transaction_id: string;
   user_id: number;
+  tenant_id?: number;
   payment_proof: Express.Multer.File;
 }
 
@@ -336,7 +337,7 @@ export class SettingsService {
   }
 
   async submitPayment(data: SubmitPaymentData) {
-    const tenantId = getTenantId();
+    const tenantId = data.tenant_id || getTenantId();
     let order = await SubscriptionRepository.getLatestOpenOrder(tenantId);
     if (order?.status === 'payment_submitted') {
       throw new Error('A subscription payment is already awaiting verification');
@@ -353,7 +354,7 @@ export class SettingsService {
       );
     }
 
-    const folder = this.cloudinaryService.getTenantFolder('payment-proofs');
+    const folder = `hallsync/tenant-${tenantId}/payment-proofs`;
     const { publicId: proofPublicId } = await this.cloudinaryService.uploadProof(
       data.payment_proof,
       folder

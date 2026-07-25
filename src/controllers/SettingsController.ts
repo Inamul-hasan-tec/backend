@@ -346,11 +346,12 @@ export class SettingsController {
     try {
       const { transaction_id } = req.body;
       const userId = req.user?.id;
+      const tenantId = (req as any).tenantId || req.user?.tenant_id;
 
-      if (!userId || !transaction_id || !req.file) {
+      if (!userId || !tenantId || !transaction_id || !req.file) {
         res.status(400).json({ 
           success: false, 
-          error: 'Transaction ID and payment proof are required' 
+          error: 'Tenant, transaction ID, and payment proof are required'
         });
         return;
       }
@@ -358,6 +359,7 @@ export class SettingsController {
       const payment = await this.settingsService.submitPayment({
         transaction_id,
         user_id: userId,
+        tenant_id: Number(tenantId),
         payment_proof: req.file
       });
 
