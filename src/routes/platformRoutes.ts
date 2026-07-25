@@ -18,6 +18,12 @@ router.get('/audit-logs', PlatformOperationsController.auditLogs.bind(PlatformOp
 router.get('/tenant-audit-logs', PlatformOperationsController.tenantAuditLogs.bind(PlatformOperationsController));
 
 router.get(
+  '/subscriptions',
+  requirePermission(Permission.SUBSCRIPTION_MANAGE),
+  PlatformSubscriptionController.listSubscriptions
+);
+
+router.get(
   '/subscription-payments',
   requirePermission(Permission.SUBSCRIPTION_MANAGE),
   PlatformSubscriptionController.listPending

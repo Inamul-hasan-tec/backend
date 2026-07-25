@@ -103,6 +103,12 @@ router.delete(
 // Billing & Subscription
 // ============================================
 router.get(
+  '/subscription/plans',
+  requirePermission(Permission.SETTINGS_VIEW),
+  settingsController.getSubscriptionPlans.bind(settingsController)
+);
+
+router.get(
   '/subscription',
   requirePermission(Permission.SETTINGS_VIEW),
   settingsController.getSubscription.bind(settingsController)
@@ -118,6 +124,12 @@ router.post(
   '/subscription/generate-qr',
   requirePermission(Permission.SETTINGS_VIEW),
   settingsController.generateUPIQR.bind(settingsController)
+);
+
+router.post(
+  '/subscription/order',
+  requirePermission(Permission.SETTINGS_UPDATE),
+  settingsController.createSubscriptionOrder.bind(settingsController)
 );
 
 router.post(

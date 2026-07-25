@@ -222,9 +222,22 @@ export class SettingsService {
   // ============================================
   // Billing & Subscription
   // ============================================
+  async getSubscriptionPlans() {
+    const plans = await SubscriptionRepository.getPlans();
+    return plans.map((plan: any) => ({
+      ...plan,
+      monthly_price: Number(plan.monthly_price),
+      annual_price: Number(plan.annual_price),
+      features: typeof plan.features === 'string'
+        ? JSON.parse(plan.features || '[]')
+        : plan.features || [],
+    }));
+  }
+
   async getSubscription() {
     const tenantId = getTenantId();
     const subscription = await SubscriptionRepository.ensureTrialSubscription(tenantId);
+    const openOrders = await SubscriptionRepository.listTenantOpenOrders(tenantId);
 
     const now = new Date();
     const periodEnd = new Date(subscription?.current_period_end || now);
@@ -236,6 +249,34 @@ export class SettingsService {
       billingCycle: subscription.billing_cycle,
       nextBillingDate: subscription.current_period_end,
       daysRemaining,
+      openOrder: openOrders[0] || null,
+    };
+  }
+
+  async createSubscriptionOrder(userId: number, planCode: string, billingCycle: 'monthly' | 'annual') {
+    const tenantId = getTenantId();
+    const selectedPlan = await SubscriptionRepository.getPlan(planCode);
+    if (!selectedPlan) {
+      throw new Error('Selected subscription plan is unavailable');
+    }
+
+    const openOrder = await SubscriptionRepository.getLatestOpenOrder(tenantId);
+    if (openOrder?.status === 'payment_submitted') {
+      throw new Error('A subscription payment is already awaiting verification');
+    }
+
+    await SubscriptionRepository.cancelPendingOrders(tenantId);
+    const order = await SubscriptionRepository.createRenewalOrder(
+      tenantId,
+      userId,
+      planCode,
+      billingCycle
+    );
+
+    return {
+      ...order,
+      amount: Number(order.amount),
+      plan_name: selectedPlan.name,
     };
   }
 
@@ -285,6 +326,9 @@ export class SettingsService {
       upi_id: upiId,
       upiId,
       amount,
+      order_number: order.order_number,
+      plan_code: order.plan_code,
+      billing_cycle: order.billing_cycle,
       qr_code_url: qrCodeUrl,
       qrCodeUrl,
       upi_link: upiString

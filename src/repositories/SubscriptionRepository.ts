@@ -13,6 +13,18 @@ export class SubscriptionRepository {
     return rows;
   }
 
+  async getPlan(planCode: string) {
+    const [rows] = await pool.query<RowDataPacket[]>(
+      `SELECT code, name, monthly_price, annual_price, hall_limit, user_limit,
+              booking_limit, storage_gb, features
+       FROM subscription_plans
+       WHERE code = ? AND is_active = TRUE
+       LIMIT 1`,
+      [planCode]
+    );
+    return rows[0] || null;
+  }
+
   async getTenantSubscription(tenantId: number) {
     const [rows] = await pool.query<RowDataPacket[]>(
       `SELECT s.*, p.name AS plan_name, p.hall_limit, p.user_limit,
@@ -103,6 +115,30 @@ export class SubscriptionRepository {
     return rows[0] || null;
   }
 
+  async cancelPendingOrders(tenantId: number) {
+    await pool.query(
+      `UPDATE subscription_orders
+       SET status = 'cancelled'
+       WHERE tenant_id = ?
+         AND status = 'pending'`,
+      [tenantId]
+    );
+  }
+
+  async listTenantOpenOrders(tenantId: number) {
+    const [rows] = await pool.query<RowDataPacket[]>(
+      `SELECT id, order_number, plan_code, billing_cycle, amount, currency,
+              status, expires_at, created_at
+       FROM subscription_orders
+       WHERE tenant_id = ?
+         AND status IN ('pending', 'payment_submitted')
+         AND expires_at > NOW()
+       ORDER BY id DESC`,
+      [tenantId]
+    );
+    return rows;
+  }
+
   async listTenantPayments(tenantId: number, limit: number, offset: number) {
     const [rows] = await pool.query<RowDataPacket[]>(
       `SELECT sp.id, sp.amount, sp.method, sp.transaction_reference AS transaction_id,
@@ -183,6 +219,42 @@ export class SubscriptionRepository {
        JOIN tenants t ON t.id = sp.tenant_id
        WHERE sp.status = 'pending'
        ORDER BY sp.created_at`
+    );
+    return rows;
+  }
+
+  async listPlatformSubscriptions() {
+    const [rows] = await pool.query<RowDataPacket[]>(
+      `SELECT
+          t.id AS tenant_id,
+          t.name AS tenant_name,
+          t.status AS tenant_status,
+          s.id AS subscription_id,
+          s.plan,
+          COALESCE(p.name, s.plan) AS plan_name,
+          s.price,
+          s.billing_cycle,
+          s.status,
+          s.current_period_start,
+          s.current_period_end,
+          DATEDIFF(s.current_period_end, NOW()) AS days_remaining,
+          (
+            SELECT COUNT(*)
+            FROM subscription_payments sp
+            WHERE sp.tenant_id = t.id AND sp.status = 'pending'
+          ) AS pending_payments,
+          (
+            SELECT MAX(sp.created_at)
+            FROM subscription_payments sp
+            WHERE sp.tenant_id = t.id
+          ) AS last_payment_at
+       FROM tenants t
+       LEFT JOIN subscriptions s ON s.tenant_id = t.id
+       LEFT JOIN subscription_plans p ON p.code = s.plan
+       ORDER BY
+         CASE WHEN s.status IN ('trial', 'past_due', 'expired') THEN 0 ELSE 1 END,
+         s.current_period_end ASC,
+         t.name ASC`
     );
     return rows;
   }

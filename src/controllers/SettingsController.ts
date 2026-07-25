@@ -262,6 +262,16 @@ export class SettingsController {
   // ============================================
   // Billing & Subscription
   // ============================================
+  async getSubscriptionPlans(req: Request, res: Response): Promise<void> {
+    try {
+      const plans = await this.settingsService.getSubscriptionPlans();
+      res.json({ success: true, data: plans });
+    } catch (error: any) {
+      console.error('Get subscription plans error:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  }
+
   async getSubscription(req: Request, res: Response): Promise<void> {
     try {
       const subscription = await this.settingsService.getSubscription();
@@ -269,6 +279,37 @@ export class SettingsController {
     } catch (error: any) {
       console.error('Get subscription error:', error);
       res.status(500).json({ success: false, error: error.message });
+    }
+  }
+
+  async createSubscriptionOrder(req: Request, res: Response): Promise<void> {
+    try {
+      const userId = req.user?.id;
+      if (!userId) {
+        res.status(401).json({ success: false, error: 'Unauthorized' });
+        return;
+      }
+
+      const planCode = String(req.body.plan_code || '').trim().toLowerCase();
+      const billingCycle = String(req.body.billing_cycle || '').trim() as 'monthly' | 'annual';
+
+      if (!planCode || !['monthly', 'annual'].includes(billingCycle)) {
+        res.status(400).json({
+          success: false,
+          error: 'Plan code and billing cycle are required',
+        });
+        return;
+      }
+
+      const order = await this.settingsService.createSubscriptionOrder(
+        userId,
+        planCode,
+        billingCycle
+      );
+      res.json({ success: true, data: order });
+    } catch (error: any) {
+      console.error('Create subscription order error:', error);
+      res.status(400).json({ success: false, error: error.message });
     }
   }
 
