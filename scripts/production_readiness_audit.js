@@ -3,6 +3,7 @@ const path = require('path');
 const mysql = require('mysql2/promise');
 const dotenv = require('dotenv');
 const { verifyBackup } = require('./verify_database_backup');
+const { backupDir: resolveBackupDir, backupHeartbeatPath } = require('./backup_paths');
 
 dotenv.config({ path: path.join(__dirname, '../.env') });
 
@@ -220,7 +221,7 @@ async function main() {
        WHERE table_schema = DATABASE()
          AND table_type = 'BASE TABLE'`
     );
-    const backupDir = path.resolve(__dirname, '../../backups/database');
+    const backupDir = resolveBackupDir();
     const latestBackup = fs.existsSync(backupDir)
       ? fs.readdirSync(backupDir)
           .filter((name) => name.endsWith('.sql'))
@@ -271,7 +272,7 @@ async function main() {
       backupAgeHours <= 26,
       Number.isFinite(backupAgeHours) ? `${backupAgeHours.toFixed(1)} hours` : '<missing>'
     );
-    const heartbeatPath = path.join(backupDir, 'scheduler-heartbeat.json');
+    const heartbeatPath = backupHeartbeatPath();
     let heartbeat = null;
     try {
       heartbeat = JSON.parse(fs.readFileSync(heartbeatPath, 'utf8'));

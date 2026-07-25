@@ -4,6 +4,7 @@ const crypto = require('crypto');
 const { spawn } = require('child_process');
 const dotenv = require('dotenv');
 const mysql = require('mysql2/promise');
+const { backupDir: resolveBackupDir } = require('./backup_paths');
 
 dotenv.config({ path: path.join(__dirname, '../.env') });
 
@@ -109,7 +110,7 @@ async function main() {
   const password = required('DB_PASSWORD');
   const database = required('DB_NAME');
 
-  const backupDir = path.resolve(__dirname, '../../backups/database');
+  const backupDir = resolveBackupDir();
   fs.mkdirSync(backupDir, { recursive: true });
 
   const fileName = `${database}-backup-${timestamp()}.sql`;

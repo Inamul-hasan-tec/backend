@@ -4,6 +4,11 @@ import { Request, Response } from 'express';
 import { RowDataPacket } from 'mysql2';
 import pool from '../config/db';
 import { productionIntegrationsReadiness } from '../utils/integrationReadiness';
+import { captureMessage, isEnabled as isErrorMonitoringEnabled } from '../utils/errorMonitor';
+
+function backupDirectory(): string {
+  return path.resolve(process.env.BACKUP_DIR || path.join(__dirname, '../../../backups/database'));
+}
 
 export class PlatformOperationsController {
   async overview(_req: Request, res: Response): Promise<void> {
@@ -73,7 +78,7 @@ export class PlatformOperationsController {
   async operations(_req: Request, res: Response): Promise<void> {
     try {
       await pool.query('SELECT 1');
-      const heartbeatPath = path.resolve(__dirname, '../../../backups/database/scheduler-heartbeat.json');
+      const heartbeatPath = path.join(backupDirectory(), 'scheduler-heartbeat.json');
       let heartbeat: Record<string, unknown> | null = null;
       try {
         heartbeat = JSON.parse(fs.readFileSync(heartbeatPath, 'utf8'));
@@ -99,6 +104,39 @@ export class PlatformOperationsController {
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to load operations status';
+      res.status(500).json({ success: false, error: message });
+    }
+  }
+
+  async testErrorMonitoring(req: Request, res: Response): Promise<void> {
+    try {
+      if (!isErrorMonitoringEnabled()) {
+        res.status(400).json({
+          success: false,
+          error: 'ERROR_MONITORING_DSN is not configured',
+        });
+        return;
+      }
+
+      const eventId = `hallsync-monitor-test-${Date.now()}`;
+      captureMessage('HallSync production monitoring test', {
+        event_id: eventId,
+        source: 'platform.operations.testErrorMonitoring',
+        request_id: req.requestId,
+        user_id: req.user?.id,
+        user_role: req.user?.role,
+      });
+
+      res.json({
+        success: true,
+        message: 'Monitoring test event queued',
+        data: {
+          event_id: eventId,
+          provider: 'sentry',
+        },
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to send monitoring test event';
       res.status(500).json({ success: false, error: message });
     }
   }

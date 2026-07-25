@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const { backupDir: resolveBackupDir } = require('./backup_paths');
 
 function positiveInteger(name, fallback) {
   const value = Number(process.env[name] || fallback);
@@ -17,7 +18,7 @@ function main() {
   }
 
   const apply = process.env.BACKUP_RETENTION_APPLY === 'true';
-  const backupDir = path.resolve(__dirname, '../../backups/database');
+  const backupDir = resolveBackupDir();
   const now = Date.now();
   const cutoff = now - retentionDays * 24 * 60 * 60 * 1000;
   const backups = fs.existsSync(backupDir)
@@ -61,4 +62,3 @@ try {
   console.error('Backup retention failed:', error.message);
   process.exitCode = 1;
 }
-

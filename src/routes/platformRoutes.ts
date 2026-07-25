@@ -13,6 +13,7 @@ router.use(requireSuperAdmin());
 
 router.get('/overview', PlatformOperationsController.overview.bind(PlatformOperationsController));
 router.get('/operations', PlatformOperationsController.operations.bind(PlatformOperationsController));
+router.post('/operations/error-monitoring/test', PlatformOperationsController.testErrorMonitoring.bind(PlatformOperationsController));
 router.get('/audit-logs', PlatformOperationsController.auditLogs.bind(PlatformOperationsController));
 router.get('/tenant-audit-logs', PlatformOperationsController.tenantAuditLogs.bind(PlatformOperationsController));
 
