@@ -173,6 +173,7 @@ async function main() {
          UNION ALL SELECT '314_discount_template_tenant_scope.sql'
          UNION ALL SELECT '315_payment_machine.sql'
          UNION ALL SELECT '316_hall_gallery.sql'
+         UNION ALL SELECT '317_calendar_insights.sql'
        ) expected
        LEFT JOIN schema_migrations sm ON sm.migration_name = expected.migration_name
        WHERE sm.migration_name IS NULL`
@@ -194,6 +195,29 @@ async function main() {
     );
     check(checks, 'blocker', 'At least two tenants exist for acceptance', Number(tenantRows[0].total) >= 2, `count=${tenantRows[0].total}`);
     check(checks, 'blocker', 'At least two accessible tenants exist', Number(tenantRows[0].accessible_count) >= 2, `count=${tenantRows[0].accessible_count || 0}`);
+
+    const calendarInsightTables = [
+      'calendar_days',
+      'calendar_events',
+      'hall_calendar_preferences',
+      'calendar_source_runs',
+    ];
+    for (const tableName of calendarInsightTables) {
+      const [tableRows] = await connection.query(
+        `SELECT COUNT(*) AS count
+         FROM information_schema.tables
+         WHERE table_schema = DATABASE()
+           AND table_name = ?`,
+        [tableName]
+      );
+      check(
+        checks,
+        'warn',
+        `Calendar insights table exists: ${tableName}`,
+        Number(tableRows[0].count) === 1,
+        `count=${tableRows[0].count}`
+      );
+    }
 
     const [tenantAdminRows] = await connection.query(
       `SELECT COUNT(DISTINCT tenant_id) AS tenant_count

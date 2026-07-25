@@ -23,6 +23,7 @@ const migrationFiles = [
   '314_discount_template_tenant_scope.sql',
   '315_payment_machine.sql',
   '316_hall_gallery.sql',
+  '317_calendar_insights.sql',
 ];
 
 async function run() {

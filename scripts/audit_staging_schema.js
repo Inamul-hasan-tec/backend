@@ -23,6 +23,7 @@ const expectedMigrations = [
   '314_discount_template_tenant_scope.sql',
   '315_payment_machine.sql',
   '316_hall_gallery.sql',
+  '317_calendar_insights.sql',
 ];
 
 const productionTarget = process.env.HALL_SYNC_PRODUCTION_TARGET === 'true';
@@ -48,6 +49,10 @@ const requiredTables = [
   'invoice_line_items',
   'invoice_payment_allocations',
   'hall_gallery',
+  'calendar_days',
+  'calendar_events',
+  'hall_calendar_preferences',
+  'calendar_source_runs',
 ];
 
 const requiredColumns = {
