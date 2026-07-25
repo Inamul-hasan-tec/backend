@@ -38,6 +38,7 @@ export interface Invoice {
   business_pincode: string;
   business_phone: string;
   business_email: string;
+  business_logo_url?: string | null;
   
   // Supply details
   supply_type: SupplyType;

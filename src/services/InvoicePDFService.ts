@@ -6,7 +6,7 @@ type CompleteInvoice = Invoice & { line_items: InvoiceLineItem[] };
 const PAGE_WIDTH = 595.28;
 const MARGIN = 42;
 const CONTENT_WIDTH = PAGE_WIDTH - MARGIN * 2;
-const TABLE_COLUMNS = [26, 182, 56, 42, 70, 54, 81];
+const TABLE_COLUMNS = [24, 150, 50, 38, 58, 66, 45, 80];
 
 function money(value: number | string | null | undefined): string {
   return `INR ${Number(value || 0).toLocaleString('en-IN', {
@@ -47,6 +47,8 @@ function bookingRef(bookingId: number | null | undefined): string {
 
 export class InvoicePDFService {
   static async generate(invoice: CompleteInvoice): Promise<Buffer> {
+    const logoBuffer = await this.loadImageBuffer(invoice.business_logo_url);
+
     return new Promise((resolve, reject) => {
       const doc = new PDFDocument({
         size: 'A4',
@@ -63,7 +65,7 @@ export class InvoicePDFService {
       doc.on('error', reject);
       doc.on('end', () => resolve(Buffer.concat(chunks)));
 
-      this.drawHeader(doc, invoice);
+      this.drawHeader(doc, invoice, logoBuffer);
       this.drawParties(doc, invoice);
       this.drawEventContext(doc, invoice);
       this.drawLineItems(doc, invoice);
@@ -75,28 +77,47 @@ export class InvoicePDFService {
     });
   }
 
-  private static drawHeader(doc: PDFKit.PDFDocument, invoice: CompleteInvoice): void {
+  private static async loadImageBuffer(url?: string | null): Promise<Buffer | null> {
+    if (!url) return null;
+
+    try {
+      const response = await fetch(url);
+      if (!response.ok) return null;
+      const contentType = response.headers.get('content-type') || '';
+      if (!contentType.includes('image/png') && !contentType.includes('image/jpeg')) {
+        return null;
+      }
+      const arrayBuffer = await response.arrayBuffer();
+      return Buffer.from(arrayBuffer);
+    } catch {
+      return null;
+    }
+  }
+
+  private static drawHeader(
+    doc: PDFKit.PDFDocument,
+    invoice: CompleteInvoice,
+    logoBuffer: Buffer | null
+  ): void {
     const title = documentTitle(invoice).toUpperCase();
     const balanceDue = Number(invoice.balance_amount || 0);
     const paidInFull = balanceDue <= 0;
 
     doc.roundedRect(MARGIN, MARGIN - 16, CONTENT_WIDTH, 94, 8).fill('#0f172a');
-    doc.roundedRect(MARGIN + 16, MARGIN + 2, 42, 42, 8).fill('#2563eb');
-    doc
-      .font('Helvetica-Bold')
-      .fontSize(16)
-      .fillColor('#ffffff')
-      .text(
-        String(invoice.business_name || 'HS')
-          .split(/\s+/)
-          .slice(0, 2)
-          .map((part) => part.charAt(0))
-          .join('')
-          .toUpperCase(),
-        MARGIN + 16,
-        MARGIN + 15,
-        { width: 42, align: 'center' }
-      );
+    doc.roundedRect(MARGIN + 16, MARGIN + 2, 42, 42, 8).fill('#ffffff');
+    if (logoBuffer) {
+      try {
+        doc.image(logoBuffer, MARGIN + 20, MARGIN + 6, {
+          fit: [34, 34],
+          align: 'center',
+          valign: 'center',
+        });
+      } catch {
+        this.drawLogoInitials(doc, invoice);
+      }
+    } else {
+      this.drawLogoInitials(doc, invoice);
+    }
     doc
       .font('Helvetica-Bold')
       .fontSize(19)
@@ -189,6 +210,25 @@ export class InvoicePDFService {
       );
     }
     doc.y = detailsY + 56;
+  }
+
+  private static drawLogoInitials(doc: PDFKit.PDFDocument, invoice: CompleteInvoice): void {
+    doc.roundedRect(MARGIN + 16, MARGIN + 2, 42, 42, 8).fill('#2563eb');
+    doc
+      .font('Helvetica-Bold')
+      .fontSize(16)
+      .fillColor('#ffffff')
+      .text(
+        String(invoice.business_name || 'HS')
+          .split(/\s+/)
+          .slice(0, 2)
+          .map((part) => part.charAt(0))
+          .join('')
+          .toUpperCase(),
+        MARGIN + 16,
+        MARGIN + 15,
+        { width: 42, align: 'center' }
+      );
   }
 
   private static drawParties(doc: PDFKit.PDFDocument, invoice: CompleteInvoice): void {
@@ -314,6 +354,7 @@ export class InvoicePDFService {
         item.description,
         item.sac_hsn,
         `${Number(item.quantity)} ${item.unit}`,
+        money(item.unit_price),
         money(item.taxable_value),
         `${taxRate.toFixed(2)}%`,
         money(item.total_amount),
@@ -336,7 +377,7 @@ export class InvoicePDFService {
     doc.rect(MARGIN, y, CONTENT_WIDTH, 24).fill('#0f172a');
     this.drawTableRow(
       doc,
-      ['#', 'Description', 'SAC/HSN', 'Qty', 'Taxable', 'GST', 'Total'],
+      ['#', 'Description', 'SAC/HSN', 'Qty', 'Rate', 'Taxable', 'GST', 'Total'],
       y,
       24,
       true

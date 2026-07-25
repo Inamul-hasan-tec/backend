@@ -271,7 +271,10 @@ export class InvoiceRepository extends TenantBaseRepository<Invoice> {
   async getInvoiceById(id: number): Promise<(Invoice & { line_items: InvoiceLineItem[] }) | null> {
     const tenantId = getTenantId();
     const [invoiceRows] = await pool.query<RowDataPacket[]>(
-      'SELECT * FROM invoices WHERE id = ? AND tenant_id = ?',
+      `SELECT i.*, bc.logo_url AS business_logo_url
+       FROM invoices i
+       LEFT JOIN business_config bc ON bc.tenant_id = i.tenant_id
+       WHERE i.id = ? AND i.tenant_id = ?`,
       [id, tenantId]
     );
 
@@ -298,7 +301,10 @@ export class InvoiceRepository extends TenantBaseRepository<Invoice> {
   async getByInvoiceNumber(invoiceNumber: string): Promise<(Invoice & { line_items: InvoiceLineItem[] }) | null> {
     const tenantId = getTenantId();
     const [invoiceRows] = await pool.query<RowDataPacket[]>(
-      'SELECT * FROM invoices WHERE invoice_number = ? AND tenant_id = ?',
+      `SELECT i.*, bc.logo_url AS business_logo_url
+       FROM invoices i
+       LEFT JOIN business_config bc ON bc.tenant_id = i.tenant_id
+       WHERE i.invoice_number = ? AND i.tenant_id = ?`,
       [invoiceNumber, tenantId]
     );
 
