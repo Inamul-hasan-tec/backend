@@ -35,17 +35,26 @@ export function errorHandler(
     error: err,
   };
 
-  logger.error('request_failed', errorContext);
+  if (statusCode >= 500) {
+    logger.error('request_failed', errorContext);
+  } else {
+    logger.warn('request_rejected', errorContext);
+  }
 
-  // Forward to error monitoring (no-op when ERROR_MONITORING_DSN is unset)
-  captureError(err, {
-    request_id: req.requestId,
-    method: req.method,
-    path: req.originalUrl || req.url,
-    status: statusCode,
-    user_id: req.user?.id,
-    tenant_id: req.tenantId || req.user?.tenant_id,
-  });
+  // Forward only real server failures to error monitoring. Expected user/business
+  // rejections such as "past date", "slot no longer available", validation
+  // failures, and conflicts should be visible in API responses/logs, not treated
+  // as production incidents.
+  if (statusCode >= 500) {
+    captureError(err, {
+      request_id: req.requestId,
+      method: req.method,
+      path: req.originalUrl || req.url,
+      status: statusCode,
+      user_id: req.user?.id,
+      tenant_id: req.tenantId || req.user?.tenant_id,
+    });
+  }
 
   res.status(statusCode).json(
     errorResponse(

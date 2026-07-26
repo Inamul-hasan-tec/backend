@@ -122,7 +122,7 @@ export const createPayment = async (req: Request, res: Response): Promise<void> 
       data: { id: paymentId }
     });
   } catch (error) {
-    console.error('Error in createPayment:', error);
+    console.warn('Payment record rejected:', error instanceof Error ? error.message : error);
     res.status(400).json({
       success: false,
       message: error instanceof Error ? error.message : 'Failed to create payment'

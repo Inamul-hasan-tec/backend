@@ -441,8 +441,6 @@ export class PaymentRepository extends TenantBaseRepository<Payment> {
         h.name AS hall_name,
         CASE
           WHEN COALESCE(p.status, 'recorded') = 'recorded' THEN 'needs_verification'
-          WHEN COALESCE(p.status, 'recorded') = 'failed' THEN 'failed'
-          WHEN COALESCE(p.status, 'recorded') = 'reversed' THEN 'reversed'
           WHEN COALESCE(p.status, 'recorded') NOT IN ('reversed', 'refunded', 'failed')
            AND p.payment_mode IN ('upi', 'bank_transfer', 'cheque', 'card')
            AND (p.transaction_id IS NULL OR TRIM(p.transaction_id) = '')
@@ -455,7 +453,7 @@ export class PaymentRepository extends TenantBaseRepository<Payment> {
        LEFT JOIN halls h ON h.id = b.hall_id AND h.tenant_id = p.tenant_id
        WHERE p.tenant_id = ?
          AND (
-          COALESCE(p.status, 'recorded') IN ('recorded', 'failed', 'reversed')
+          COALESCE(p.status, 'recorded') = 'recorded'
           OR (
             COALESCE(p.status, 'recorded') NOT IN ('reversed', 'refunded', 'failed')
             AND p.payment_mode IN ('upi', 'bank_transfer', 'cheque', 'card')
@@ -465,8 +463,6 @@ export class PaymentRepository extends TenantBaseRepository<Payment> {
        ORDER BY
         CASE COALESCE(p.status, 'recorded')
           WHEN 'recorded' THEN 1
-          WHEN 'failed' THEN 2
-          WHEN 'reversed' THEN 3
           ELSE 4
         END,
         p.payment_date DESC,
