@@ -103,7 +103,7 @@ export class InvoicePDFService {
     const balanceDue = Number(invoice.balance_amount || 0);
     const paidInFull = balanceDue <= 0;
 
-    doc.roundedRect(MARGIN, MARGIN - 16, CONTENT_WIDTH, 94, 8).fill('#0f172a');
+    doc.roundedRect(MARGIN, MARGIN - 16, CONTENT_WIDTH, 94, 8).fillAndStroke('#ffffff', '#e2e8f0');
     doc.roundedRect(MARGIN + 16, MARGIN + 2, 42, 42, 8).fill('#ffffff');
     if (logoBuffer) {
       try {
@@ -121,14 +121,14 @@ export class InvoicePDFService {
     doc
       .font('Helvetica-Bold')
       .fontSize(19)
-      .fillColor('#ffffff')
+      .fillColor('#0f172a')
       .text(invoice.business_name || 'Hall Sync', MARGIN + 72, MARGIN + 2, {
         width: 265,
       });
     doc
       .font('Helvetica')
       .fontSize(8.5)
-      .fillColor('#cbd5e1')
+      .fillColor('#475569')
       .text(
         partyAddress([
           invoice.business_address,
@@ -143,7 +143,7 @@ export class InvoicePDFService {
     doc
       .font('Helvetica')
       .fontSize(8)
-      .fillColor('#cbd5e1')
+      .fillColor('#475569')
       .text(
         [invoice.business_phone, invoice.business_email].filter(Boolean).join(' | ') || '-',
         MARGIN + 72,
@@ -153,7 +153,7 @@ export class InvoicePDFService {
     doc
       .font('Helvetica-Bold')
       .fontSize(18)
-      .fillColor('#ffffff')
+      .fillColor('#0f172a')
       .text(title, PAGE_WIDTH - MARGIN - 190, MARGIN + 2, {
         width: 190,
         align: 'right',
@@ -161,18 +161,18 @@ export class InvoicePDFService {
     doc
       .font('Helvetica')
       .fontSize(9)
-      .fillColor('#cbd5e1')
+      .fillColor('#475569')
       .text(invoice.invoice_number, PAGE_WIDTH - MARGIN - 190, MARGIN + 25, {
         width: 190,
         align: 'right',
       });
     doc
       .roundedRect(PAGE_WIDTH - MARGIN - 116, MARGIN + 47, 116, 18, 9)
-      .fill(paidInFull ? '#dcfce7' : '#ffedd5');
+      .fillAndStroke('#f8fafc', '#e2e8f0');
     doc
       .font('Helvetica-Bold')
       .fontSize(8)
-      .fillColor(paidInFull ? '#166534' : '#9a3412')
+      .fillColor(paidInFull ? '#166534' : '#0f172a')
       .text(paidInFull ? 'PAID IN FULL' : 'BALANCE DUE', PAGE_WIDTH - MARGIN - 108, MARGIN + 53, {
         width: 100,
         align: 'center',
@@ -180,7 +180,7 @@ export class InvoicePDFService {
     doc
       .font('Helvetica')
       .fontSize(9)
-      .fillColor('#cbd5e1')
+      .fillColor('#475569')
       .text(invoice.business_gstin ? `GSTIN: ${invoice.business_gstin}` : 'GSTIN: Not provided', MARGIN + 72, MARGIN + 66)
       .text(`Status: ${String(invoice.status).replace(/_/g, ' ').toUpperCase()}`, PAGE_WIDTH - MARGIN - 190, MARGIN + 69, {
         width: 190,
@@ -280,14 +280,14 @@ export class InvoicePDFService {
     const y = doc.y;
     const boxWidth = (CONTENT_WIDTH - 16) / 3;
     const boxes: Array<[string, string, string, string]> = [
-      ['Grand Total', money(invoice.grand_total), '#eff6ff', '#1e3a8a'],
-      ['Amount Paid', money(invoice.amount_paid), '#ecfdf5', '#166534'],
-      ['Balance Due', money(invoice.balance_amount), '#fff7ed', '#9a3412'],
+      ['Grand Total', money(invoice.grand_total), '#ffffff', '#0f172a'],
+      ['Amount Paid', money(invoice.amount_paid), '#ffffff', '#0f172a'],
+      ['Balance Due', money(invoice.balance_amount), '#ffffff', '#0f172a'],
     ];
 
     boxes.forEach(([label, value, fill, color], index) => {
       const x = MARGIN + index * (boxWidth + 8);
-      doc.roundedRect(x, y, boxWidth, 42, 5).fillAndStroke(fill, '#d1d5db');
+      doc.roundedRect(x, y, boxWidth, 42, 5).fillAndStroke(fill, '#e2e8f0');
       doc.font('Helvetica').fontSize(8).fillColor('#64748b').text(label, x + 10, y + 10, {
         width: boxWidth - 20,
       });
@@ -429,7 +429,7 @@ export class InvoicePDFService {
     rows.forEach(([label, value, emphasized]) => {
       const y = doc.y;
       if (emphasized) {
-        doc.roundedRect(x + 8, y - 2, 229, 18, 3).fill(label === 'Grand Total' ? '#dbeafe' : '#fef3c7');
+        doc.roundedRect(x + 8, y - 2, 229, 18, 3).fill('#eff6ff');
       }
       doc
         .font(emphasized ? 'Helvetica-Bold' : 'Helvetica')

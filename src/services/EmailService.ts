@@ -13,6 +13,19 @@ function escapeHtml(value: string): string {
   }[character] || character));
 }
 
+function currency(value: number | string | null | undefined): string {
+  return `₹${Number(value || 0).toLocaleString('en-IN', {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  })}`;
+}
+
+function bookingCode(value: number | string): string {
+  const raw = String(value);
+  if (raw.startsWith('BK-') || raw.startsWith('BK')) return escapeHtml(raw);
+  return `BK-${String(value).padStart(6, '0')}`;
+}
+
 interface BookingEmailData {
   customer_name: string;
   customer_email: string;
@@ -78,6 +91,83 @@ function sanitizeEmailError(error: any): string {
   return response.replace(/(password|pass|token|secret|key)=\S+/gi, '$1=[REDACTED]');
 }
 
+function emailShell(options: {
+  title: string;
+  eyebrow: string;
+  intro: string;
+  body: string;
+  footer?: string;
+}): string {
+  return `
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${escapeHtml(options.title)}</title>
+</head>
+<body style="margin:0;padding:0;background:#f8fafc;font-family:Arial,Helvetica,sans-serif;color:#0f172a;">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f8fafc;padding:24px 12px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="640" cellspacing="0" cellpadding="0" style="width:100%;max-width:640px;background:#ffffff;border:1px solid #e2e8f0;border-radius:18px;overflow:hidden;">
+          <tr>
+            <td style="padding:28px 32px 22px;border-bottom:1px solid #e2e8f0;background:#ffffff;">
+              <p style="margin:0 0 10px;font-size:11px;font-weight:700;letter-spacing:.18em;text-transform:uppercase;color:#2563eb;">${escapeHtml(options.eyebrow)}</p>
+              <h1 style="margin:0;font-size:26px;line-height:1.2;color:#0f172a;">${escapeHtml(options.title)}</h1>
+              <p style="margin:10px 0 0;font-size:15px;line-height:1.6;color:#475569;">${escapeHtml(options.intro)}</p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:28px 32px;">
+              ${options.body}
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:18px 32px;border-top:1px solid #e2e8f0;background:#f8fafc;">
+              <p style="margin:0;font-size:12px;line-height:1.6;color:#64748b;">
+                ${options.footer || 'This message was generated from HallSync for a venue booking record.'}
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+}
+
+function keyValueTable(rows: Array<[string, string]>): string {
+  return `
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border:1px solid #e2e8f0;border-radius:14px;overflow:hidden;margin:18px 0;">
+  ${rows
+    .map(
+      ([label, value], index) => `
+  <tr>
+    <td style="width:42%;padding:13px 16px;border-top:${index === 0 ? '0' : '1px solid #e2e8f0'};background:#f8fafc;font-size:13px;color:#64748b;">${escapeHtml(label)}</td>
+    <td style="padding:13px 16px;border-top:${index === 0 ? '0' : '1px solid #e2e8f0'};font-size:13px;font-weight:700;color:#0f172a;">${escapeHtml(value)}</td>
+  </tr>`
+    )
+    .join('')}
+</table>`;
+}
+
+function paymentSummary(rows: Array<[string, string, boolean?]>): string {
+  return `
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border:1px solid #e2e8f0;border-radius:14px;overflow:hidden;margin:18px 0;">
+  ${rows
+    .map(
+      ([label, value, strong], index) => `
+  <tr>
+    <td style="padding:13px 16px;border-top:${index === 0 ? '0' : '1px solid #e2e8f0'};background:${strong ? '#eff6ff' : '#ffffff'};font-size:${strong ? '15px' : '13px'};font-weight:${strong ? '700' : '400'};color:#475569;">${escapeHtml(label)}</td>
+    <td align="right" style="padding:13px 16px;border-top:${index === 0 ? '0' : '1px solid #e2e8f0'};background:${strong ? '#eff6ff' : '#ffffff'};font-size:${strong ? '16px' : '13px'};font-weight:700;color:#0f172a;">${escapeHtml(value)}</td>
+  </tr>`
+    )
+    .join('')}
+</table>`;
+}
+
 export class EmailService {
   private transporter: nodemailer.Transporter;
 
@@ -111,13 +201,20 @@ export class EmailService {
       from: senderAddress(),
       to: data.to,
       subject: 'Set up your Hall Sync account',
-      html: `
-        <h2>Hello ${escapeHtml(data.name)},</h2>
-        <p>You have been invited to join Hall Sync.</p>
-        <p><a href="${escapeHtml(data.inviteUrl)}">Set your password and activate your account</a></p>
-        <p>This one-time link expires in ${data.expiresInHours} hours.</p>
-        <p>If you were not expecting this invitation, ignore this email.</p>
-      `,
+      html: emailShell({
+        eyebrow: 'Account invitation',
+        title: 'Set up your HallSync account',
+        intro: `Hello ${data.name}, you have been invited to join a venue workspace on HallSync.`,
+        body: `
+          <p style="margin:0 0 18px;font-size:15px;line-height:1.7;color:#334155;">Use the secure one-time link below to set your password and activate your account.</p>
+          <p style="margin:0 0 22px;">
+            <a href="${escapeHtml(data.inviteUrl)}" style="display:inline-block;border-radius:12px;background:#0f172a;color:#ffffff;text-decoration:none;padding:13px 18px;font-size:14px;font-weight:700;">Activate account</a>
+          </p>
+          <div style="border:1px solid #e2e8f0;border-radius:14px;background:#f8fafc;padding:14px 16px;color:#475569;font-size:13px;line-height:1.6;">
+            This link expires in <strong>${data.expiresInHours} hours</strong>. If you were not expecting this invitation, you can safely ignore this email.
+          </div>
+        `,
+      }),
     });
     return true;
   }
@@ -216,181 +313,35 @@ export class EmailService {
     eventDate: string,
     dueDateText: string
   ): string {
-    return `
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Booking Confirmation</title>
-</head>
-<body style="margin: 0; padding: 0; font-family: Arial, sans-serif; background-color: #f3f4f6;">
-  <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #f3f4f6; padding: 20px;">
-    <tr>
-      <td align="center">
-        <table width="600" cellpadding="0" cellspacing="0" style="background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
-          
-          <!-- Header -->
-          <tr>
-            <td style="background: linear-gradient(135deg, #3B82F6 0%, #8B5CF6 100%); padding: 40px 20px; text-align: center;">
-              <h1 style="color: #ffffff; margin: 0; font-size: 32px; font-weight: bold;">HALL SYNC</h1>
-              <p style="color: #ffffff; margin: 10px 0 0 0; font-size: 14px;">Premium Event Management</p>
-            </td>
-          </tr>
-          
-          <!-- Success Icon -->
-          <tr>
-            <td style="padding: 30px 20px; text-align: center;">
-              <div style="width: 80px; height: 80px; background-color: #10B981; border-radius: 50%; margin: 0 auto; display: flex; align-items: center; justify-content: center;">
-                <span style="color: #ffffff; font-size: 40px;">✓</span>
-              </div>
-              <h2 style="color: #1F2937; margin: 20px 0 10px 0; font-size: 24px;">Booking Confirmed!</h2>
-              <p style="color: #6B7280; margin: 0; font-size: 16px;">Your event booking has been successfully confirmed.</p>
-            </td>
-          </tr>
-          
-          <!-- Booking Details -->
-          <tr>
-            <td style="padding: 0 40px 30px 40px;">
-              <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #F9FAFB; border-radius: 8px; padding: 20px;">
-                <tr>
-                  <td style="padding-bottom: 15px;">
-                    <h3 style="color: #1F2937; margin: 0 0 15px 0; font-size: 18px; border-bottom: 2px solid #E5E7EB; padding-bottom: 10px;">Booking Details</h3>
-                  </td>
-                </tr>
-                <tr>
-                  <td style="padding: 8px 0;">
-                    <table width="100%">
-                      <tr>
-                        <td style="color: #6B7280; font-size: 14px; width: 40%;">Booking ID:</td>
-                        <td style="color: #1F2937; font-size: 14px; font-weight: bold;">BK-${String(data.booking_id).padStart(6, '0')}</td>
-                      </tr>
-                    </table>
-                  </td>
-                </tr>
-                <tr>
-                  <td style="padding: 8px 0;">
-                    <table width="100%">
-                      <tr>
-                        <td style="color: #6B7280; font-size: 14px; width: 40%;">Hall:</td>
-                        <td style="color: #1F2937; font-size: 14px; font-weight: bold;">${data.hall_name}</td>
-                      </tr>
-                    </table>
-                  </td>
-                </tr>
-                <tr>
-                  <td style="padding: 8px 0;">
-                    <table width="100%">
-                      <tr>
-                        <td style="color: #6B7280; font-size: 14px; width: 40%;">Date:</td>
-                        <td style="color: #1F2937; font-size: 14px; font-weight: bold;">${eventDate}</td>
-                      </tr>
-                    </table>
-                  </td>
-                </tr>
-                <tr>
-                  <td style="padding: 8px 0;">
-                    <table width="100%">
-                      <tr>
-                        <td style="color: #6B7280; font-size: 14px; width: 40%;">Time:</td>
-                        <td style="color: #1F2937; font-size: 14px; font-weight: bold;">${timeSlotText}</td>
-                      </tr>
-                    </table>
-                  </td>
-                </tr>
-                <tr>
-                  <td style="padding: 8px 0;">
-                    <table width="100%">
-                      <tr>
-                        <td style="color: #6B7280; font-size: 14px; width: 40%;">Package:</td>
-                        <td style="color: #1F2937; font-size: 14px; font-weight: bold;">${data.package_name}</td>
-                      </tr>
-                    </table>
-                  </td>
-                </tr>
-              </table>
-            </td>
-          </tr>
-          
-          <!-- Payment Summary -->
-          <tr>
-            <td style="padding: 0 40px 30px 40px;">
-              <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #FEF3C7; border-radius: 8px; padding: 20px; border-left: 4px solid #F59E0B;">
-                <tr>
-                  <td style="padding-bottom: 15px;">
-                    <h3 style="color: #92400E; margin: 0 0 15px 0; font-size: 18px;">Payment Summary</h3>
-                  </td>
-                </tr>
-                <tr>
-                  <td style="padding: 8px 0;">
-                    <table width="100%">
-                      <tr>
-                        <td style="color: #78350F; font-size: 14px;">Total Amount:</td>
-                        <td align="right" style="color: #78350F; font-size: 14px; font-weight: bold;">₹${data.total_amount.toLocaleString('en-IN')}</td>
-                      </tr>
-                    </table>
-                  </td>
-                </tr>
-                <tr>
-                  <td style="padding: 8px 0;">
-                    <table width="100%">
-                      <tr>
-                        <td style="color: #78350F; font-size: 14px;">Advance Paid:</td>
-                        <td align="right" style="color: #10B981; font-size: 14px; font-weight: bold;">₹${data.advance_paid.toLocaleString('en-IN')}</td>
-                      </tr>
-                    </table>
-                  </td>
-                </tr>
-                <tr>
-                  <td style="padding: 8px 0; border-top: 2px solid #FCD34D;">
-                    <table width="100%">
-                      <tr>
-                        <td style="color: #78350F; font-size: 16px; font-weight: bold;">Balance Due:</td>
-                        <td align="right" style="color: #DC2626; font-size: 18px; font-weight: bold;">₹${data.balance_amount.toLocaleString('en-IN')}</td>
-                      </tr>
-                    </table>
-                  </td>
-                </tr>
-                ${data.balance_amount > 0 ? `
-                <tr>
-                  <td style="padding: 15px 0 0 0;">
-                    <div style="background-color: #FEE2E2; padding: 12px; border-radius: 6px; text-align: center;">
-                      <p style="color: #991B1B; margin: 0; font-size: 14px; font-weight: bold;">⚠️ Please pay the balance by ${dueDateText}</p>
-                    </div>
-                  </td>
-                </tr>
-                ` : ''}
-              </table>
-            </td>
-          </tr>
-          
-          <!-- Contact Info -->
-          <tr>
-            <td style="padding: 0 40px 30px 40px; text-align: center;">
-              <p style="color: #6B7280; margin: 0 0 10px 0; font-size: 14px;">Need help? Contact us:</p>
-              <p style="color: #3B82F6; margin: 0; font-size: 14px;">
-                📧 info@hallsync.com | 📞 +91 1234567890
-              </p>
-            </td>
-          </tr>
-          
-          <!-- Footer -->
-          <tr>
-            <td style="background-color: #F9FAFB; padding: 20px; text-align: center; border-top: 1px solid #E5E7EB;">
-              <p style="color: #9CA3AF; margin: 0; font-size: 12px;">
-                © 2025 Hall Sync. All rights reserved.<br>
-                123 Event Street, Mumbai, Maharashtra 400001
-              </p>
-            </td>
-          </tr>
-          
-        </table>
-      </td>
-    </tr>
-  </table>
-</body>
-</html>
-    `;
+    return emailShell({
+      eyebrow: 'Booking confirmation',
+      title: 'Your booking is confirmed',
+      intro: `Hello ${data.customer_name}, your booking for ${data.hall_name} has been recorded.`,
+      body: `
+        <h2 style="margin:0 0 12px;font-size:16px;color:#0f172a;">Booking details</h2>
+        ${keyValueTable([
+          ['Booking ID', bookingCode(data.booking_id)],
+          ['Hall', data.hall_name],
+          ['Event date', eventDate],
+          ['Time slot', timeSlotText],
+          ['Package', data.package_name],
+        ])}
+        <h2 style="margin:22px 0 12px;font-size:16px;color:#0f172a;">Payment summary</h2>
+        ${paymentSummary([
+          ['Total amount', currency(data.total_amount)],
+          ['Advance paid', currency(data.advance_paid)],
+          ['Balance due', currency(data.balance_amount), true],
+          ['Payment mode', data.payment_mode.toUpperCase()],
+        ])}
+        ${
+          data.balance_amount > 0
+            ? `<div style="border:1px solid #bfdbfe;border-radius:14px;background:#eff6ff;padding:14px 16px;color:#1e3a8a;font-size:13px;line-height:1.6;">
+                Suggested balance due date: <strong>${escapeHtml(dueDateText)}</strong>.
+              </div>`
+            : ''
+        }
+      `,
+    });
   }
 
   /**
@@ -401,108 +352,35 @@ export class EmailService {
     timeSlotText: string,
     eventDate: string
   ): string {
-    const urgencyLevel = data.days_until_event <= 3 ? 'HIGH' : data.days_until_event <= 7 ? 'MEDIUM' : 'LOW';
-    const urgencyColor = urgencyLevel === 'HIGH' ? '#DC2626' : urgencyLevel === 'MEDIUM' ? '#F59E0B' : '#10B981';
+    const timingText =
+      data.days_until_event <= 0
+        ? 'The event date is today or has arrived.'
+        : `The event is in ${data.days_until_event} day${data.days_until_event === 1 ? '' : 's'}.`;
     
-    return `
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Payment Reminder</title>
-</head>
-<body style="margin: 0; padding: 0; font-family: Arial, sans-serif; background-color: #f3f4f6;">
-  <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #f3f4f6; padding: 20px;">
-    <tr>
-      <td align="center">
-        <table width="600" cellpadding="0" cellspacing="0" style="background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
-          
-          <!-- Header -->
-          <tr>
-            <td style="background: linear-gradient(135deg, #DC2626 0%, #F59E0B 100%); padding: 40px 20px; text-align: center;">
-              <h1 style="color: #ffffff; margin: 0; font-size: 32px; font-weight: bold;">💰 PAYMENT REMINDER</h1>
-              <p style="color: #ffffff; margin: 10px 0 0 0; font-size: 14px;">Hall Sync</p>
-            </td>
-          </tr>
-          
-          <!-- Content -->
-          <tr>
-            <td style="padding: 40px;">
-              <h2 style="color: #1F2937; margin: 0 0 20px 0; font-size: 22px;">Dear ${data.customer_name},</h2>
-              <p style="color: #4B5563; margin: 0 0 20px 0; font-size: 16px; line-height: 1.6;">
-                This is a friendly reminder that you have a balance payment due for your upcoming event booking.
-              </p>
-              
-              <!-- Booking Info -->
-              <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #FEF3C7; border-radius: 8px; padding: 20px; margin: 20px 0; border-left: 4px solid #F59E0B;">
-                <tr>
-                  <td>
-                    <p style="color: #92400E; margin: 0 0 10px 0; font-size: 14px;"><strong>Booking ID:</strong> ${data.booking_id}</p>
-                    <p style="color: #92400E; margin: 0 0 10px 0; font-size: 14px;"><strong>Hall:</strong> ${data.hall_name}</p>
-                    <p style="color: #92400E; margin: 0 0 10px 0; font-size: 14px;"><strong>Event Date:</strong> ${eventDate}</p>
-                    <p style="color: #92400E; margin: 0 0 10px 0; font-size: 14px;"><strong>Time Slot:</strong> ${timeSlotText}</p>
-                    <p style="color: #92400E; margin: 0 0 10px 0; font-size: 14px;"><strong>Days Until Event:</strong> ${data.days_until_event} days</p>
-                  </td>
-                </tr>
-              </table>
-              
-              <!-- Payment Summary -->
-              <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #F3F4F6; border-radius: 8px; padding: 20px; margin: 20px 0;">
-                <tr>
-                  <td>
-                    <p style="color: #4B5563; margin: 0 0 10px 0; font-size: 14px;">Total Amount: <strong>₹${data.total_amount.toLocaleString('en-IN')}</strong></p>
-                    <p style="color: #10B981; margin: 0 0 10px 0; font-size: 14px;">Advance Paid: <strong>₹${data.advance_amount.toLocaleString('en-IN')}</strong></p>
-                    <hr style="border: none; border-top: 1px solid #D1D5DB; margin: 10px 0;">
-                    <p style="color: #DC2626; margin: 0; font-size: 20px; font-weight: bold;">Balance Due: ₹${data.balance_amount.toLocaleString('en-IN')}</p>
-                  </td>
-                </tr>
-              </table>
-              
-              <!-- Urgency Alert -->
-              <div style="background-color: ${urgencyLevel === 'HIGH' ? '#FEE2E2' : '#FEF3C7'}; padding: 20px; border-radius: 8px; text-align: center; margin: 20px 0; border: 2px solid ${urgencyColor};">
-                <p style="color: ${urgencyColor}; margin: 0; font-size: 16px; font-weight: bold;">
-                  ${urgencyLevel === 'HIGH' ? '🚨 URGENT: ' : urgencyLevel === 'MEDIUM' ? '⚠️ REMINDER: ' : '📅 NOTICE: '}
-                  Your event is ${data.days_until_event} days away!
-                </p>
-              </div>
-              
-              <p style="color: #4B5563; margin: 20px 0; font-size: 16px; line-height: 1.6;">
-                Please make the payment at your earliest convenience to ensure your booking remains confirmed.
-              </p>
-              
-              <p style="color: #4B5563; margin: 0; font-size: 16px; line-height: 1.6;">
-                If you have already made the payment, please ignore this reminder.
-              </p>
-            </td>
-          </tr>
-          
-          <!-- Contact -->
-          <tr>
-            <td style="padding: 0 40px 40px 40px; text-align: center;">
-              <p style="color: #6B7280; margin: 0 0 10px 0; font-size: 14px;">Questions? Contact us:</p>
-              <p style="color: #3B82F6; margin: 0; font-size: 14px;">
-                📧 info@hallsync.com | 📞 +91 1234567890
-              </p>
-            </td>
-          </tr>
-          
-          <!-- Footer -->
-          <tr>
-            <td style="background-color: #F9FAFB; padding: 20px; text-align: center; border-top: 1px solid #E5E7EB;">
-              <p style="color: #9CA3AF; margin: 0; font-size: 12px;">
-                © 2025 Hall Sync. All rights reserved.
-              </p>
-            </td>
-          </tr>
-          
-        </table>
-      </td>
-    </tr>
-  </table>
-</body>
-</html>
-    `;
+    return emailShell({
+      eyebrow: 'Payment reminder',
+      title: 'Balance payment reminder',
+      intro: `Hello ${data.customer_name}, this is a reminder for your upcoming booking. ${timingText}`,
+      body: `
+        <h2 style="margin:0 0 12px;font-size:16px;color:#0f172a;">Booking details</h2>
+        ${keyValueTable([
+          ['Booking ID', data.booking_id],
+          ['Hall', data.hall_name],
+          ['Event date', eventDate],
+          ['Time slot', timeSlotText],
+          ['Event timing', timingText],
+        ])}
+        <h2 style="margin:22px 0 12px;font-size:16px;color:#0f172a;">Amount pending</h2>
+        ${paymentSummary([
+          ['Total amount', currency(data.total_amount)],
+          ['Advance paid', currency(data.advance_amount)],
+          ['Balance due', currency(data.balance_amount), true],
+        ])}
+        <p style="margin:18px 0 0;font-size:14px;line-height:1.7;color:#334155;">
+          Please complete the pending balance as agreed with the venue. If the payment is already completed, please ignore this message.
+        </p>
+      `,
+    });
   }
 }
 

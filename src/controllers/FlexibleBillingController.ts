@@ -224,34 +224,15 @@ export class FlexibleBillingController {
    * Query params: ?active_only=true (optional, default: false)
    */
   static async getDiscountTemplates(req: Request, res: Response) {
-    try {
-      const tenantId = getTenantId();
-      // Check if we should filter by active only
-      const activeOnly = req.query.active_only === 'true';
-      
-      let query = 'SELECT * FROM discount_templates WHERE tenant_id = ?';
-      const params: any[] = [tenantId];
-      
-      if (activeOnly) {
-        query += ' AND is_active = 1';
-      }
-      
-      query += ' ORDER BY name';
-
-      const [rows] = await pool.query<RowDataPacket[]>(query, params);
-
-      res.json({
-        success: true,
-        data: rows
-      });
-    } catch (error: any) {
-      console.error('Error fetching discount templates:', error);
-      res.status(500).json({
-        success: false,
-        message: 'Failed to fetch discount templates',
-        error: error.message
-      });
-    }
+    // Discount templates were an early flexible-billing idea, but the current
+    // production invoice builder uses simple per-invoice discounts instead.
+    // Keep this endpoint safe for older clients without requiring an unused
+    // discount_templates table in production.
+    res.json({
+      success: true,
+      data: [],
+      message: 'Reusable discount templates are currently disabled. Use the invoice builder discount section.'
+    });
   }
 
   /**
@@ -259,38 +240,10 @@ export class FlexibleBillingController {
    * POST /api/discount-templates
    */
   static async createDiscountTemplate(req: Request, res: Response) {
-    try {
-      const tenantId = getTenantId();
-      const {
-        name,
-        description,
-        discount_type,
-        discount_value,
-        reason_template
-      } = req.body;
-
-      const [result] = await pool.query<ResultSetHeader>(
-        `INSERT INTO discount_templates 
-         (tenant_id, name, description, discount_type, discount_value, reason_template)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-        [tenantId, name, description, discount_type, discount_value, reason_template]
-      );
-
-      res.status(201).json({
-        success: true,
-        message: 'Discount template created successfully',
-        data: {
-          id: result.insertId
-        }
-      });
-    } catch (error: any) {
-      console.error('Error creating discount template:', error);
-      res.status(500).json({
-        success: false,
-        message: 'Failed to create discount template',
-        error: error.message
-      });
-    }
+    res.status(410).json({
+      success: false,
+      message: 'Reusable discount templates are disabled. Apply discounts directly while creating an estimate or invoice.'
+    });
   }
 
   /**
@@ -298,75 +251,10 @@ export class FlexibleBillingController {
    * PUT /api/discount-templates/:id
    */
   static async updateDiscountTemplate(req: Request, res: Response) {
-    try {
-      const tenantId = getTenantId();
-      const templateId = parseInt(req.params.id);
-      const {
-        name,
-        description,
-        discount_type,
-        discount_value,
-        reason_template,
-        is_active
-      } = req.body;
-
-      // Build dynamic update query
-      const updates: string[] = [];
-      const values: any[] = [];
-
-      if (name !== undefined) {
-        updates.push('name = ?');
-        values.push(name);
-      }
-      if (description !== undefined) {
-        updates.push('description = ?');
-        values.push(description);
-      }
-      if (discount_type !== undefined) {
-        updates.push('discount_type = ?');
-        values.push(discount_type);
-      }
-      if (discount_value !== undefined) {
-        updates.push('discount_value = ?');
-        values.push(discount_value);
-      }
-      if (reason_template !== undefined) {
-        updates.push('reason_template = ?');
-        values.push(reason_template);
-      }
-      if (is_active !== undefined) {
-        updates.push('is_active = ?');
-        values.push(is_active);
-      }
-
-      if (updates.length === 0) {
-        return res.status(400).json({
-          success: false,
-          message: 'No fields to update'
-        });
-      }
-
-      values.push(templateId, tenantId);
-
-      await pool.query(
-        `UPDATE discount_templates 
-         SET ${updates.join(', ')}
-         WHERE id = ? AND tenant_id = ?`,
-        values
-      );
-
-      res.json({
-        success: true,
-        message: 'Discount template updated successfully'
-      });
-    } catch (error: any) {
-      console.error('Error updating discount template:', error);
-      res.status(500).json({
-        success: false,
-        message: 'Failed to update discount template',
-        error: error.message
-      });
-    }
+    res.status(410).json({
+      success: false,
+      message: 'Reusable discount templates are disabled. Apply discounts directly while creating an estimate or invoice.'
+    });
   }
 
   /**
@@ -374,27 +262,10 @@ export class FlexibleBillingController {
    * DELETE /api/discount-templates/:id
    */
   static async deleteDiscountTemplate(req: Request, res: Response) {
-    try {
-      const tenantId = getTenantId();
-      const templateId = parseInt(req.params.id);
-
-      await pool.query(
-        'DELETE FROM discount_templates WHERE id = ? AND tenant_id = ?',
-        [templateId, tenantId]
-      );
-
-      res.json({
-        success: true,
-        message: 'Discount template deleted successfully'
-      });
-    } catch (error: any) {
-      console.error('Error deleting discount template:', error);
-      res.status(500).json({
-        success: false,
-        message: 'Failed to delete discount template',
-        error: error.message
-      });
-    }
+    res.status(410).json({
+      success: false,
+      message: 'Reusable discount templates are disabled. Apply discounts directly while creating an estimate or invoice.'
+    });
   }
 
   /**

@@ -6,6 +6,7 @@
 import { Request, Response } from 'express';
 import { PaymentService } from '../services/PaymentService';
 import AuditRepository from '../repositories/AuditRepository';
+import NotificationService from '../services/NotificationService';
 
 const paymentService = new PaymentService();
 
@@ -115,6 +116,10 @@ export const createPayment = async (req: Request, res: Response): Promise<void> 
       },
       ipAddress: req.ip,
     });
+    const payment = await paymentService.getPaymentById(paymentId);
+    if (payment) {
+      NotificationService.paymentChanged(req.user?.id, payment, 'recorded');
+    }
 
     res.status(201).json({
       success: true,
@@ -154,6 +159,7 @@ export const verifyPayment = async (req: Request, res: Response): Promise<void> 
       },
       ipAddress: req.ip,
     });
+    NotificationService.paymentChanged(req.user.id, payment, 'verified');
 
     res.json({
       success: true,
@@ -195,6 +201,7 @@ export const reversePayment = async (req: Request, res: Response): Promise<void>
       },
       ipAddress: req.ip,
     });
+    NotificationService.paymentChanged(req.user.id, payment, 'reversed');
 
     res.json({
       success: true,
@@ -235,6 +242,7 @@ export const markPaymentFailed = async (req: Request, res: Response): Promise<vo
       },
       ipAddress: req.ip,
     });
+    NotificationService.paymentChanged(req.user.id, payment, 'failed');
 
     res.json({
       success: true,

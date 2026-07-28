@@ -464,10 +464,18 @@ export class InvoiceRepository extends TenantBaseRepository<Invoice> {
         bookingId,
         paymentAmount
       );
+      const referenceRequired = ['upi', 'bank_transfer', 'cheque', 'card'].includes(data.payment_mode);
+      const transactionReference = referenceRequired ? data.transaction_reference?.trim() || null : null;
+      const cashReferenceNote =
+        !referenceRequired && data.transaction_reference?.trim()
+          ? `Cash counter reference/note: ${data.transaction_reference.trim()}`
+          : '';
+      const notes = [data.notes?.trim(), cashReferenceNote].filter(Boolean).join('\n') || null;
+
       await assertUniqueTransactionReference(
         connection,
         tenantId,
-        data.transaction_reference
+        transactionReference
       );
       const receiptNumber = await generatePaymentReceiptNumber(connection, tenantId);
       const paymentId = await insertBookingPayment(connection, {
@@ -476,9 +484,9 @@ export class InvoiceRepository extends TenantBaseRepository<Invoice> {
         amount: paymentAmount,
         paymentMode: data.payment_mode,
         paymentType: 'balance',
-        transactionId: data.transaction_reference || null,
+        transactionId: transactionReference,
         paymentDate: data.payment_date,
-        notes: data.notes || null,
+        notes,
         receivedBy: data.received_by || null,
         status: 'recorded',
         idempotencyKey: data.idempotency_key || null,

@@ -24,6 +24,7 @@ const expectedMigrations = [
   '315_payment_machine.sql',
   '316_hall_gallery.sql',
   '317_calendar_insights.sql',
+  '318_owner_activity_notifications.sql',
 ];
 
 const productionTarget = process.env.HALL_SYNC_PRODUCTION_TARGET === 'true';
@@ -53,6 +54,7 @@ const requiredTables = [
   'calendar_events',
   'hall_calendar_preferences',
   'calendar_source_runs',
+  'notifications',
 ];
 
 const requiredColumns = {
@@ -137,6 +139,19 @@ const requiredColumns = {
     'invoice_id',
     'payment_id',
     'amount',
+  ],
+  notifications: [
+    'tenant_id',
+    'user_id',
+    'actor_user_id',
+    'type',
+    'title',
+    'message',
+    'entity_type',
+    'entity_id',
+    'priority',
+    'metadata',
+    'read_at',
   ],
 };
 

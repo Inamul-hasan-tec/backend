@@ -43,13 +43,23 @@ export class PaymentService {
     if (data.payment_type === 'refund' || data.payment_type === 'correction') {
       throw new Error('Refunds and corrections must use the controlled payment action flow');
     }
-    if (referenceRequiredModes.has(data.payment_mode) && !data.transaction_id?.trim()) {
+    const referenceRequired = referenceRequiredModes.has(data.payment_mode);
+    const trimmedReference = data.transaction_id?.trim();
+
+    if (referenceRequired && !trimmedReference) {
       throw new Error('Transaction reference is required for this payment mode');
     }
 
+    const notes = data.notes?.trim();
+    const cashReferenceNote =
+      !referenceRequired && trimmedReference
+        ? `Cash counter reference/note: ${trimmedReference}`
+        : '';
+
     const paymentData: CreatePaymentDTO = {
       ...data,
-      transaction_id: data.transaction_id?.trim() || undefined,
+      transaction_id: referenceRequired ? trimmedReference : undefined,
+      notes: [notes, cashReferenceNote].filter(Boolean).join('\n') || undefined,
       payment_date: data.payment_date ? new Date(data.payment_date) : new Date(),
     };
     return this.paymentRepo.createForBooking(paymentData);

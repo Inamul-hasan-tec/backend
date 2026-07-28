@@ -8,6 +8,7 @@ import { BookingService } from '../services/BookingService';
 import { successResponse, errorResponse } from '../utils/response';
 import { asyncHandler } from '../middleware/errorHandler';
 import EmailService from '../services/EmailService';
+import NotificationService from '../services/NotificationService';
 
 const bookingService = new BookingService();
 
@@ -138,6 +139,8 @@ export const createBooking = asyncHandler(async (req: Request, res: Response) =>
         // Email failure doesn't affect booking creation
       });
     }
+
+    NotificationService.bookingCreated(req.user?.id, booking);
     
     console.log(`🎉 Booking creation completed in ${Date.now() - startTime}ms`);
     res.status(201).json(successResponse('Booking created successfully', booking));
@@ -161,6 +164,9 @@ export const updateBooking = asyncHandler(async (req: Request, res: Response) =>
   const id = parseInt(req.params.id);
   await bookingService.updateBooking(id, req.body);
   const booking = await bookingService.getBookingById(id);
+  if (booking) {
+    NotificationService.bookingUpdated(req.user?.id, booking, 'updated');
+  }
   res.json(successResponse('Booking updated successfully', booking));
 });
 
@@ -172,6 +178,9 @@ export const confirmBooking = asyncHandler(async (req: Request, res: Response) =
   const id = parseInt(req.params.id);
   await bookingService.confirmBooking(id);
   const booking = await bookingService.getBookingById(id);
+  if (booking) {
+    NotificationService.bookingUpdated(req.user?.id, booking, 'confirmed');
+  }
   res.json(successResponse('Booking confirmed successfully', booking));
 });
 
@@ -183,6 +192,9 @@ export const cancelBooking = asyncHandler(async (req: Request, res: Response) =>
   const id = parseInt(req.params.id);
   await bookingService.cancelBooking(id);
   const booking = await bookingService.getBookingById(id);
+  if (booking) {
+    NotificationService.bookingUpdated(req.user?.id, booking, 'cancelled');
+  }
   res.json(successResponse('Booking cancelled successfully', booking));
 });
 
@@ -194,5 +206,8 @@ export const completeBooking = asyncHandler(async (req: Request, res: Response) 
   const id = parseInt(req.params.id);
   await bookingService.completeBooking(id);
   const booking = await bookingService.getBookingById(id);
+  if (booking) {
+    NotificationService.bookingUpdated(req.user?.id, booking, 'completed');
+  }
   res.json(successResponse('Booking completed successfully', booking));
 });

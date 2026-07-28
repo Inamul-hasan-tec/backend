@@ -11,6 +11,7 @@ import InvoiceEmailService, {
   EmailConfigurationError,
 } from '../services/InvoiceEmailService';
 import AuditRepository from '../repositories/AuditRepository';
+import NotificationService from '../services/NotificationService';
 
 export class InvoiceController {
   /**
@@ -205,6 +206,9 @@ export class InvoiceController {
 
       const invoiceId = await InvoiceRepository.createInvoice(invoiceData, userId);
       const invoice = await InvoiceRepository.getInvoiceById(invoiceId);
+      if (invoice) {
+        NotificationService.invoiceCreated(req.user?.id, invoice);
+      }
 
       res.status(201).json({
         success: true,
@@ -421,6 +425,14 @@ export class InvoiceController {
         },
         ipAddress: req.ip,
       });
+      const invoiceId = paymentData.allocations[0]?.invoice_id;
+      if (invoiceId) {
+        NotificationService.invoicePaymentRecorded(req.user?.id, invoiceId, {
+          id: paymentId,
+          amount: paymentData.amount,
+          payment_mode: paymentData.payment_mode,
+        });
+      }
 
       res.status(201).json({
         success: true,

@@ -24,6 +24,7 @@ const migrationFiles = [
   '315_payment_machine.sql',
   '316_hall_gallery.sql',
   '317_calendar_insights.sql',
+  '318_owner_activity_notifications.sql',
 ];
 
 async function run() {

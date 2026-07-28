@@ -174,6 +174,7 @@ async function main() {
          UNION ALL SELECT '315_payment_machine.sql'
          UNION ALL SELECT '316_hall_gallery.sql'
          UNION ALL SELECT '317_calendar_insights.sql'
+         UNION ALL SELECT '318_owner_activity_notifications.sql'
        ) expected
        LEFT JOIN schema_migrations sm ON sm.migration_name = expected.migration_name
        WHERE sm.migration_name IS NULL`
@@ -218,6 +219,20 @@ async function main() {
         `count=${tableRows[0].count}`
       );
     }
+
+    const [notificationTableRows] = await connection.query(
+      `SELECT COUNT(*) AS count
+       FROM information_schema.tables
+       WHERE table_schema = DATABASE()
+         AND table_name = 'notifications'`
+    );
+    check(
+      checks,
+      'warn',
+      'Owner activity notifications table exists',
+      Number(notificationTableRows[0].count) === 1,
+      `count=${notificationTableRows[0].count}`
+    );
 
     const [tenantAdminRows] = await connection.query(
       `SELECT COUNT(DISTINCT tenant_id) AS tenant_count
