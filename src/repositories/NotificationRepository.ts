@@ -60,16 +60,29 @@ class NotificationRepository {
 
   async createForTenantAdmins(input: NotifyAdminsInput): Promise<number[]> {
     const tenantId = getTenantId();
+    const preferenceEventType = this.preferenceEventTypeFor(input.type);
     const [adminRows] = await pool.execute<RowDataPacket[]>(
       `SELECT DISTINCT u.id
        FROM users u
        INNER JOIN user_tenants ut ON ut.user_id = u.id
+       LEFT JOIN notification_preferences np
+         ON np.user_id = u.id
+        AND np.tenant_id = ut.tenant_id
+        AND np.channel = 'in_app'
+        AND np.event_type = ?
        WHERE ut.tenant_id = ?
          AND ut.role = 'admin'
          AND ut.is_active = TRUE
          AND u.status = 'active'
-         AND (? IS NULL OR u.id <> ?)`,
-      [tenantId, input.actorUserId || null, input.actorUserId || null]
+         AND (? IS NULL OR u.id <> ?)
+         AND (? IS NULL OR COALESCE(np.enabled, TRUE) = TRUE)`,
+      [
+        preferenceEventType,
+        tenantId,
+        input.actorUserId || null,
+        input.actorUserId || null,
+        preferenceEventType,
+      ]
     );
 
     const notificationIds: number[] = [];
@@ -187,6 +200,22 @@ class NotificationRepository {
       throw new Error('User context is missing. Cannot execute notification query.');
     }
     return Number(context.userId);
+  }
+
+  private preferenceEventTypeFor(type: string): string | null {
+    if (type === 'booking.created') return 'booking_created';
+    if (['booking.updated', 'booking.confirmed', 'booking.completed'].includes(type)) {
+      return 'booking_updated';
+    }
+    if (type === 'booking.cancelled') return 'booking_cancelled';
+    if (['payment.recorded', 'payment.verified', 'invoice.payment_recorded'].includes(type)) {
+      return 'payment_received';
+    }
+    if (['payment.reversed', 'payment.failed'].includes(type)) {
+      return 'payment_received';
+    }
+    if (type === 'invoice.created') return 'invoice_created';
+    return null;
   }
 }
 

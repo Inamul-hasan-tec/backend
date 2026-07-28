@@ -404,7 +404,16 @@ export class SettingsService {
         booking_cancelled: true,
         payment_received: true,
         payment_reminder: true,
+        invoice_created: true,
         daily_summary: true,
+      },
+      in_app: {
+        booking_created: true,
+        booking_updated: true,
+        booking_cancelled: true,
+        payment_received: true,
+        payment_reminder: true,
+        invoice_created: true,
       },
       sms: {
         booking_created: false,
@@ -412,6 +421,7 @@ export class SettingsService {
         booking_cancelled: false,
         payment_received: false,
         payment_reminder: false,
+        invoice_created: false,
       },
       whatsapp: {
         booking_created: false,
@@ -419,6 +429,7 @@ export class SettingsService {
         booking_cancelled: false,
         payment_received: false,
         payment_reminder: false,
+        invoice_created: false,
       }
     };
 
@@ -436,7 +447,7 @@ export class SettingsService {
     const updates: any[] = [];
 
     // Flatten preferences object
-    for (const channel of ['email', 'sms', 'whatsapp']) {
+    for (const channel of ['in_app', 'email', 'sms', 'whatsapp']) {
       if (preferences[channel]) {
         for (const [eventType, enabled] of Object.entries(preferences[channel])) {
           updates.push({
@@ -458,19 +469,20 @@ export class SettingsService {
 
   private async createDefaultNotificationPreferences(userId: number) {
     const tenantId = getTenantId();
-    const channels = ['email', 'sms', 'whatsapp'];
+    const channels = ['in_app', 'email', 'sms', 'whatsapp'];
     const events = [
       'booking_created',
       'booking_updated',
       'booking_cancelled',
       'payment_received',
       'payment_reminder',
+      'invoice_created',
       'daily_summary'
     ];
 
     for (const channel of channels) {
       for (const event of events) {
-        // Skip daily_summary for sms and whatsapp
+        // Daily summaries are email-only for now.
         if (event === 'daily_summary' && channel !== 'email') continue;
 
         await this.settingsRepository.createNotificationPreference({
@@ -478,7 +490,7 @@ export class SettingsService {
           tenant_id: tenantId,
           channel,
           event_type: event,
-          enabled: channel === 'email'
+          enabled: channel === 'email' || channel === 'in_app'
         });
       }
     }
