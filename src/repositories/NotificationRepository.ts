@@ -30,25 +30,32 @@ export interface NotifyAdminsInput {
 
 class NotificationRepository {
   async create(input: CreateNotificationInput): Promise<number> {
-    const [result] = await pool.execute<ResultSetHeader>(
-      `INSERT INTO notifications
-       (tenant_id, user_id, actor_user_id, type, title, message, entity_type, entity_id, priority, metadata)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        input.tenantId,
-        input.userId,
-        input.actorUserId || null,
-        input.type,
-        input.title,
-        input.message,
-        input.entityType || null,
-        input.entityId || null,
-        input.priority || 'normal',
-        input.metadata ? JSON.stringify(input.metadata) : null,
-      ]
-    );
+    try {
+      const [result] = await pool.execute<ResultSetHeader>(
+        `INSERT INTO notifications
+         (tenant_id, user_id, actor_user_id, type, title, message, entity_type, entity_id, priority, metadata)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          input.tenantId,
+          input.userId,
+          input.actorUserId || null,
+          input.type,
+          input.title,
+          input.message,
+          input.entityType || null,
+          input.entityId || null,
+          input.priority || 'normal',
+          input.metadata ? JSON.stringify(input.metadata) : null,
+        ]
+      );
 
-    return result.insertId;
+      return result.insertId;
+    } catch (error: any) {
+      if (error?.code === 'ER_NO_SUCH_TABLE' || error?.errno === 1146) {
+        return 0;
+      }
+      throw error;
+    }
   }
 
   async createForTenantAdmins(input: NotifyAdminsInput): Promise<number[]> {
@@ -86,52 +93,66 @@ class NotificationRepository {
   }
 
   async listForCurrentUser(limit = 20, onlyUnread = false): Promise<RowDataPacket[]> {
-    const tenantId = getTenantId();
-    const safeLimit = Math.min(Math.max(Math.floor(limit || 20), 1), 50);
-    const userId = this.getCurrentUserId();
-    const unreadClause = onlyUnread ? 'AND n.read_at IS NULL' : '';
+    try {
+      const tenantId = getTenantId();
+      const safeLimit = Math.min(Math.max(Math.floor(limit || 20), 1), 50);
+      const userId = this.getCurrentUserId();
+      const unreadClause = onlyUnread ? 'AND n.read_at IS NULL' : '';
 
-    const [rows] = await pool.execute<RowDataPacket[]>(
-      `SELECT
-         n.id,
-         n.type,
-         n.title,
-         n.message,
-         n.entity_type,
-         n.entity_id,
-         n.priority,
-         n.metadata,
-         n.read_at,
-         n.created_at,
-         n.actor_user_id,
-         actor.name AS actor_name,
-         actor.email AS actor_email
-       FROM notifications n
-       LEFT JOIN users actor ON actor.id = n.actor_user_id
-       WHERE n.tenant_id = ?
-         AND n.user_id = ?
-         ${unreadClause}
-       ORDER BY n.created_at DESC, n.id DESC
-       LIMIT ${safeLimit}`,
-      [tenantId, userId]
-    );
+      const [rows] = await pool.execute<RowDataPacket[]>(
+        `SELECT
+           n.id,
+           n.type,
+           n.title,
+           n.message,
+           n.entity_type,
+           n.entity_id,
+           n.priority,
+           n.metadata,
+           n.read_at,
+           n.created_at,
+           n.actor_user_id,
+           actor.name AS actor_name,
+           actor.email AS actor_email
+         FROM notifications n
+         LEFT JOIN users actor ON actor.id = n.actor_user_id
+         WHERE n.tenant_id = ?
+           AND n.user_id = ?
+           ${unreadClause}
+         ORDER BY n.created_at DESC, n.id DESC
+         LIMIT ${safeLimit}`,
+        [tenantId, userId]
+      );
 
-    return rows;
+      return rows;
+    } catch (error: any) {
+      if (error?.code === 'ER_NO_SUCH_TABLE' || error?.errno === 1146) {
+        return [];
+      }
+      throw error;
+    }
   }
 
   async unreadCountForCurrentUser(): Promise<number> {
-    const tenantId = getTenantId();
-    const userId = this.getCurrentUserId();
-    const [rows] = await pool.execute<RowDataPacket[]>(
-      `SELECT COUNT(*) AS count
-       FROM notifications
-       WHERE tenant_id = ?
-         AND user_id = ?
-         AND read_at IS NULL`,
-      [tenantId, userId]
-    );
+    try {
+      const tenantId = getTenantId();
+      const userId = this.getCurrentUserId();
+      const [rows] = await pool.execute<RowDataPacket[]>(
+        `SELECT COUNT(*) AS count
+         FROM notifications
+         WHERE tenant_id = ?
+           AND user_id = ?
+           AND read_at IS NULL`,
+        [tenantId, userId]
+      );
 
-    return Number(rows[0]?.count || 0);
+      return Number(rows[0]?.count || 0);
+    } catch (error: any) {
+      if (error?.code === 'ER_NO_SUCH_TABLE' || error?.errno === 1146) {
+        return 0;
+      }
+      throw error;
+    }
   }
 
   async markReadForCurrentUser(notificationId: number): Promise<boolean> {
