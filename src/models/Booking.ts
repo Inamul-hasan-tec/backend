@@ -10,7 +10,7 @@ export interface Booking {
   hall_id: number;
   package_id?: number;
   event_date: Date;
-  time_slot?: 'morning' | 'afternoon' | 'night';
+  time_slot?: 'morning' | 'afternoon' | 'night' | 'full_day';
   slot_id?: number;
   event_type: 'wedding' | 'reception' | 'engagement' | 'birthday' | 'corporate' | 'other';
   guest_count?: number;
@@ -31,7 +31,7 @@ export interface CreateBookingDTO {
   hall_id: number;
   package_id?: number;
   event_date: string | Date;
-  time_slot?: 'morning' | 'afternoon' | 'night';
+  time_slot?: 'morning' | 'afternoon' | 'night' | 'full_day';
   slot_id?: number;
   event_type: 'wedding' | 'reception' | 'engagement' | 'birthday' | 'corporate' | 'other';
   guest_count?: number;
@@ -48,7 +48,7 @@ export interface UpdateBookingDTO {
   hall_id?: number;
   package_id?: number;
   event_date?: string | Date;
-  time_slot?: 'morning' | 'afternoon' | 'night';
+  time_slot?: 'morning' | 'afternoon' | 'night' | 'full_day';
   slot_id?: number;
   event_type?: 'wedding' | 'reception' | 'engagement' | 'birthday' | 'corporate' | 'other';
   guest_count?: number;

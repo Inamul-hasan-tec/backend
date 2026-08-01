@@ -25,6 +25,7 @@ const expectedMigrations = [
   '316_hall_gallery.sql',
   '317_calendar_insights.sql',
   '318_owner_activity_notifications.sql',
+  '319_tenant_calendar_slot_mode.sql',
 ];
 
 const productionTarget = process.env.HALL_SYNC_PRODUCTION_TARGET === 'true';

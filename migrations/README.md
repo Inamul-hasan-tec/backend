@@ -37,6 +37,8 @@ Current platform migrations:
 - `315_payment_machine.sql`
 - `316_hall_gallery.sql`
 - `317_calendar_insights.sql`
+- `318_owner_activity_notifications.sql`
+- `319_tenant_calendar_slot_mode.sql`
 
 For the distinction between tracked migrations, legacy migration history,
 `schema_v2.sql`, backups, and restore drills, read `../docs/DATABASE.md`.

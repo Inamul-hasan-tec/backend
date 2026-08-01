@@ -11,6 +11,18 @@ import { SlotService } from '../services/SlotService';
 import pool from '../config/db';
 
 const slotService = new SlotService();
+const DEFAULT_TENANT_SETTINGS: Record<string, string> = {
+  calendar_slot_mode: 'three_slots',
+};
+
+const ALLOWED_TENANT_SETTINGS: Record<string, Set<string> | null> = {
+  calendar_slot_mode: new Set(['three_slots', 'two_slots', 'full_day']),
+};
+
+const normalizeTenantSettings = (settings: Record<string, string>) => ({
+  ...DEFAULT_TENANT_SETTINGS,
+  ...settings,
+});
 
 export class TenantController {
   /**
@@ -27,7 +39,7 @@ export class TenantController {
 
       res.json({
         tenant,
-        settings,
+        settings: normalizeTenantSettings(settings),
       });
     } catch (error: any) {
       console.error('Get current tenant error:', error);
@@ -62,7 +74,7 @@ export class TenantController {
 
       res.json({
         tenant,
-        settings,
+        settings: normalizeTenantSettings(settings),
       });
     } catch (error: any) {
       console.error('Get tenant by ID error:', error);
@@ -106,7 +118,7 @@ export class TenantController {
     try {
       const tenantId = getTenantId();
       const settings = await TenantRepository.getSettings(tenantId);
-      res.json(settings);
+      res.json(normalizeTenantSettings(settings));
     } catch (error: any) {
       console.error('Get tenant settings error:', error);
       res.status(500).json({ error: error.message });
@@ -124,8 +136,21 @@ export class TenantController {
       if (!key) {
         return res.status(400).json({ error: 'Setting key is required' });
       }
+      const allowedValues = ALLOWED_TENANT_SETTINGS[key];
+      if (allowedValues === undefined) {
+        return res.status(400).json({
+          error: 'This tenant setting is not supported.',
+          supported_settings: Object.keys(ALLOWED_TENANT_SETTINGS),
+        });
+      }
+      if (allowedValues && !allowedValues.has(String(value))) {
+        return res.status(400).json({
+          error: 'Invalid calendar slot mode.',
+          allowed_values: Array.from(allowedValues),
+        });
+      }
 
-      await TenantRepository.setSetting(tenantId, key, value);
+      await TenantRepository.setSetting(tenantId, key, String(value));
       await AuditRepository.recordTenant({
         actorUserId: req.user?.id,
         action: 'tenant.setting_updated',

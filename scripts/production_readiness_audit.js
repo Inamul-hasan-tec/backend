@@ -175,6 +175,7 @@ async function main() {
          UNION ALL SELECT '316_hall_gallery.sql'
          UNION ALL SELECT '317_calendar_insights.sql'
          UNION ALL SELECT '318_owner_activity_notifications.sql'
+         UNION ALL SELECT '319_tenant_calendar_slot_mode.sql'
        ) expected
        LEFT JOIN schema_migrations sm ON sm.migration_name = expected.migration_name
        WHERE sm.migration_name IS NULL`

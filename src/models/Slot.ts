@@ -3,11 +3,13 @@
  * Represents hall availability slots
  */
 
+export type SlotType = 'morning' | 'afternoon' | 'night' | 'full_day';
+
 export interface Slot {
   id: number;
   hall_id: number;
   slot_date: Date;
-  slot_type: 'morning' | 'afternoon' | 'night';
+  slot_type: SlotType;
   status: 'available' | 'booked' | 'blocked';
   booking_id?: number | null;
   notes?: string;
@@ -29,7 +31,7 @@ export interface CreateSlotDTO {
   hall_id: number;
   tenant_id: number;
   slot_date: string | Date;
-  slot_type: 'morning' | 'afternoon' | 'night';
+  slot_type: SlotType;
   status?: 'available' | 'booked' | 'blocked';
   booking_id?: number;
   notes?: string;

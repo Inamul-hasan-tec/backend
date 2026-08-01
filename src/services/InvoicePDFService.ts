@@ -167,13 +167,26 @@ export class InvoicePDFService {
         align: 'right',
       });
     doc
-      .roundedRect(PAGE_WIDTH - MARGIN - 116, MARGIN + 47, 116, 18, 9)
+      .font('Helvetica')
+      .fontSize(7.5)
+      .fillColor('#64748b')
+      .text(
+        'Customer total is tax-inclusive where GST applies',
+        PAGE_WIDTH - MARGIN - 190,
+        MARGIN + 38,
+        {
+          width: 190,
+          align: 'right',
+        }
+      );
+    doc
+      .roundedRect(PAGE_WIDTH - MARGIN - 116, MARGIN + 55, 116, 18, 9)
       .fillAndStroke('#f8fafc', '#e2e8f0');
     doc
       .font('Helvetica-Bold')
       .fontSize(8)
       .fillColor(paidInFull ? '#166534' : '#0f172a')
-      .text(paidInFull ? 'PAID IN FULL' : 'BALANCE DUE', PAGE_WIDTH - MARGIN - 108, MARGIN + 53, {
+      .text(paidInFull ? 'PAID IN FULL' : 'BALANCE DUE', PAGE_WIDTH - MARGIN - 108, MARGIN + 61, {
         width: 100,
         align: 'center',
       });

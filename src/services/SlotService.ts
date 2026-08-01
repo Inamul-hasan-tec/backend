@@ -6,11 +6,18 @@
 import { RowDataPacket } from 'mysql2';
 import pool from '../config/db';
 import { SlotRepository } from '../repositories/SlotRepository';
-import { Slot, SlotWithBookingDetails, CreateSlotDTO, UpdateSlotDTO } from '../models/Slot';
+import { Slot, SlotWithBookingDetails, CreateSlotDTO, UpdateSlotDTO, SlotType } from '../models/Slot';
 import { getTenantId } from '../utils/tenantContext';
 import SubscriptionRepository from '../repositories/SubscriptionRepository';
+import TenantRepository from '../repositories/TenantRepository';
 
-const SLOT_TYPES: Array<'morning' | 'afternoon' | 'night'> = ['morning', 'afternoon', 'night'];
+type CalendarSlotMode = 'three_slots' | 'two_slots' | 'full_day';
+const DEFAULT_SLOT_MODE: CalendarSlotMode = 'three_slots';
+const SLOT_TYPES_BY_MODE: Record<CalendarSlotMode, SlotType[]> = {
+  three_slots: ['morning', 'afternoon', 'night'],
+  two_slots: ['afternoon', 'night'],
+  full_day: ['full_day'],
+};
 const SLOT_GENERATION_STATUSES = new Set(['trial', 'active']);
 const MAX_PLATFORM_RANGE_DAYS = 731;
 
@@ -38,11 +45,25 @@ const daysBetweenInclusive = (from: string, to: string): number => {
   return Math.floor((end - start) / 86400000) + 1;
 };
 
+const normalizeSlotMode = (value?: string | null): CalendarSlotMode => {
+  if (value === 'two_slots' || value === 'full_day' || value === 'three_slots') {
+    return value;
+  }
+  return DEFAULT_SLOT_MODE;
+};
+
 export class SlotService {
   private slotRepository: SlotRepository;
 
   constructor() {
     this.slotRepository = new SlotRepository();
+  }
+
+  private async getSlotTypesForTenant(tenantId: number): Promise<SlotType[]> {
+    const mode = normalizeSlotMode(
+      await TenantRepository.getSetting(tenantId, 'calendar_slot_mode')
+    );
+    return SLOT_TYPES_BY_MODE[mode];
   }
 
   /**
@@ -142,7 +163,7 @@ export class SlotService {
   async isSlotAvailable(
     hallId: number,
     date: string,
-    slotType: 'morning' | 'afternoon' | 'night'
+    slotType: SlotType
   ): Promise<boolean> {
     const tenantId = getTenantId();
     const sql = `
@@ -165,7 +186,7 @@ export class SlotService {
   async getSlotByHallDateType(
     hallId: number,
     date: string,
-    slotType: 'morning' | 'afternoon' | 'night'
+    slotType: SlotType
   ): Promise<Slot | null> {
     const tenantId = getTenantId();
     const sql = `
@@ -206,10 +227,12 @@ export class SlotService {
     const daysInMonth = new Date(year, month, 0).getDate();
     let createdCount = 0;
 
+    const slotTypes = await this.getSlotTypesForTenant(tenantId);
+
     for (let day = 1; day <= daysInMonth; day++) {
       const date = `${year}-${month.toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}`;
 
-      for (const slotType of SLOT_TYPES) {
+      for (const slotType of slotTypes) {
         // Check if slot already exists
         const existing = await this.getSlotByHallDateType(hallId, date, slotType);
 
@@ -232,10 +255,10 @@ export class SlotService {
   }
 
   /**
-   * Generate exactly three daily slots for a hall between two dates.
+   * Generate daily slots for a hall between two dates using the tenant's slot mode.
    *
    * This method is intentionally idempotent: existing slots are never updated,
-   * deleted, or overwritten. It only creates missing morning/afternoon/night
+   * deleted, or overwritten. It only creates missing configured
    * slots, preserving booked and manually blocked inventory.
    */
   async generateSlotsForHallRange(
@@ -267,12 +290,13 @@ export class SlotService {
     }
 
     let createdCount = 0;
+    const slotTypes = await this.getSlotTypesForTenant(tenantId);
     let cursor = parseDateOnly(from);
 
     for (let day = 0; day < totalDays; day++) {
       const slotDate = cursor.toISOString().slice(0, 10);
 
-      for (const slotType of SLOT_TYPES) {
+      for (const slotType of slotTypes) {
         const [result] = await pool.execute<any>(
           `INSERT IGNORE INTO slots
            (tenant_id, hall_id, slot_date, slot_type, status, created_at, updated_at)
