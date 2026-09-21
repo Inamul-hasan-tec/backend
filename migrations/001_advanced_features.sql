@@ -26,9 +26,9 @@ CREATE TABLE IF NOT EXISTS hall_images (
   INDEX idx_order (hall_id, image_order)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- Add primary_image_url to halls table (if not exists)
-ALTER TABLE halls 
-ADD COLUMN IF NOT EXISTS primary_image_url VARCHAR(500) AFTER description;
+SET @col_exists = (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'halls' AND COLUMN_NAME = 'primary_image_url');
+SET @sql = IF(@col_exists = 0, 'ALTER TABLE halls ADD COLUMN primary_image_url VARCHAR(500) AFTER description', 'SELECT ''primary_image_url column exists'' AS migration_note');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
 -- ============================================
 -- 2. CUSTOM PACKAGE BUILDER WITH ADD-ONS

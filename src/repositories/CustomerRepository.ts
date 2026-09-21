@@ -5,7 +5,7 @@
 
 import { RowDataPacket } from 'mysql2';
 import { TenantBaseRepository } from './TenantBaseRepository';
-import { Customer, CustomerSearchParams } from '../models/Customer';
+import { Customer, CustomerSearchParams, CustomerDependencyStats } from '../models/Customer';
 import pool from '../config/db';
 import { validateLimit, validateOffset } from '../utils/validators';
 import { getTenantId } from '../utils/tenantContext';
@@ -152,5 +152,84 @@ export class CustomerRepository extends TenantBaseRepository<Customer> {
       inactive: inactiveRows[0].count,
       byEventType,
     };
+  }
+
+  /**
+   * Get customer dependency counts and financial summary
+   */
+  async getCustomerDependencies(id: number): Promise<CustomerDependencyStats> {
+    const tenantId = getTenantId();
+
+    const [bookingRows] = await pool.execute<RowDataPacket[]>(
+      `SELECT 
+        SUM(CASE WHEN status != 'cancelled' THEN 1 ELSE 0 END) as active_bookings,
+        SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END) as cancelled_bookings,
+        SUM(CASE WHEN status != 'cancelled' THEN GREATEST(0, (total_amount - COALESCE(advance_amount, 0))) ELSE 0 END) as outstanding_balance,
+        SUM(CASE WHEN status != 'cancelled' THEN COALESCE(advance_amount, 0) ELSE 0 END) as total_paid_bookings
+       FROM bookings WHERE customer_id = ? AND tenant_id = ?`,
+      [id, tenantId]
+    );
+
+    const [paymentRows] = await pool.execute<RowDataPacket[]>(
+      `SELECT COUNT(*) as payments_count, SUM(p.amount) as total_payments 
+       FROM payments p
+       JOIN bookings b ON p.booking_id = b.id
+       WHERE b.customer_id = ? AND b.tenant_id = ?`,
+      [id, tenantId]
+    );
+
+    const [invoiceRows] = await pool.execute<RowDataPacket[]>(
+      `SELECT COUNT(*) as invoices_count 
+       FROM invoices WHERE customer_id = ? AND tenant_id = ?`,
+      [id, tenantId]
+    );
+
+    const active_bookings = Number(bookingRows[0]?.active_bookings || 0);
+    const cancelled_bookings = Number(bookingRows[0]?.cancelled_bookings || 0);
+    const outstanding_balance = Math.max(0, Number(bookingRows[0]?.outstanding_balance || 0));
+    const payments_count = Number(paymentRows[0]?.payments_count || 0);
+    const invoices_count = Number(invoiceRows[0]?.invoices_count || 0);
+    const total_paid = Number(paymentRows[0]?.total_payments || bookingRows[0]?.total_paid_bookings || 0);
+
+    return {
+      active_bookings,
+      cancelled_bookings,
+      payments_count,
+      invoices_count,
+      total_paid,
+      outstanding_balance,
+    };
+  }
+
+  /**
+   * Archive customer and log audit entry
+   */
+  async archiveCustomer(id: number, reason: string, actorId: number): Promise<boolean> {
+    const tenantId = getTenantId();
+
+    const [result] = await pool.execute<any>(
+      `UPDATE ${this.tableName} SET status = 'archived', updated_at = NOW() WHERE id = ? AND tenant_id = ?`,
+      [id, tenantId]
+    );
+
+    if (result.affectedRows > 0) {
+      try {
+        await pool.execute(
+          `INSERT INTO audit_logs (tenant_id, user_id, action, entity_type, entity_id, new_values, created_at)
+           VALUES (?, ?, 'archive_customer', 'customer', ?, ?, NOW())`,
+          [
+            tenantId,
+            actorId || null,
+            id,
+            JSON.stringify({ status: 'archived', reason: reason || 'Customer archived by staff' })
+          ]
+        );
+      } catch (err) {
+        console.error('Failed to write customer archive audit log:', err);
+      }
+      return true;
+    }
+
+    return false;
   }
 }

@@ -260,8 +260,54 @@ export class SettingsController {
   }
 
   // ============================================
+  // Operations Settings
+  // ============================================
+  async getOperationSettings(req: Request, res: Response): Promise<void> {
+    try {
+      const settings = await this.settingsService.getOperationSettings();
+      res.json({ success: true, data: settings });
+    } catch (error: any) {
+      console.error('Get operation settings error:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  }
+
+  async updateOperationSettings(req: Request, res: Response): Promise<void> {
+    try {
+      const settings = await this.settingsService.updateOperationSettings(req.body);
+      await AuditRepository.recordTenant({
+        actorUserId: req.user?.id,
+        action: 'operation_settings.updated',
+        entityType: 'tenant_operation_settings',
+        entityId: getTenantId(),
+        newValues: req.body,
+        ipAddress: req.ip,
+      });
+
+      res.json({
+        success: true,
+        message: 'Operations settings updated successfully',
+        data: settings,
+      });
+    } catch (error: any) {
+      console.error('Update operation settings error:', error);
+      res.status(400).json({ success: false, error: error.message });
+    }
+  }
+
+  // ============================================
   // Billing & Subscription
   // ============================================
+  async getSubscriptionPlans(req: Request, res: Response): Promise<void> {
+    try {
+      const plans = await this.settingsService.getSubscriptionPlans();
+      res.json({ success: true, data: plans });
+    } catch (error: any) {
+      console.error('Get subscription plans error:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  }
+
   async getSubscription(req: Request, res: Response): Promise<void> {
     try {
       const subscription = await this.settingsService.getSubscription();
@@ -269,6 +315,37 @@ export class SettingsController {
     } catch (error: any) {
       console.error('Get subscription error:', error);
       res.status(500).json({ success: false, error: error.message });
+    }
+  }
+
+  async createSubscriptionOrder(req: Request, res: Response): Promise<void> {
+    try {
+      const userId = req.user?.id;
+      if (!userId) {
+        res.status(401).json({ success: false, error: 'Unauthorized' });
+        return;
+      }
+
+      const planCode = String(req.body.plan_code || '').trim().toLowerCase();
+      const billingCycle = String(req.body.billing_cycle || '').trim() as 'monthly' | 'annual';
+
+      if (!planCode || !['monthly', 'annual'].includes(billingCycle)) {
+        res.status(400).json({
+          success: false,
+          error: 'Plan code and billing cycle are required',
+        });
+        return;
+      }
+
+      const order = await this.settingsService.createSubscriptionOrder(
+        userId,
+        planCode,
+        billingCycle
+      );
+      res.json({ success: true, data: order });
+    } catch (error: any) {
+      console.error('Create subscription order error:', error);
+      res.status(400).json({ success: false, error: error.message });
     }
   }
 
@@ -305,11 +382,12 @@ export class SettingsController {
     try {
       const { transaction_id } = req.body;
       const userId = req.user?.id;
+      const tenantId = (req as any).tenantId || req.user?.tenant_id;
 
-      if (!userId || !transaction_id || !req.file) {
+      if (!userId || !tenantId || !transaction_id || !req.file) {
         res.status(400).json({ 
           success: false, 
-          error: 'Transaction ID and payment proof are required' 
+          error: 'Tenant, transaction ID, and payment proof are required'
         });
         return;
       }
@@ -317,6 +395,7 @@ export class SettingsController {
       const payment = await this.settingsService.submitPayment({
         transaction_id,
         user_id: userId,
+        tenant_id: Number(tenantId),
         payment_proof: req.file
       });
 

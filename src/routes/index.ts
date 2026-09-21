@@ -25,6 +25,10 @@ import userRoutes from './userRoutes';
 import settingsRoutes from './settingsRoutes';
 import galleryRoutes from './galleryRoutes';
 import platformRoutes from './platformRoutes';
+import calendarInsightsRoutes from './calendarInsightsRoutes';
+import notificationRoutes from './notificationRoutes';
+import inventoryRoutes from './inventoryRoutes';
+import employeeRoutes from './employeeRoutes';
 import { auth } from '../middleware/auth';
 import { tenantMiddleware } from '../middleware/tenantMiddleware';
 
@@ -43,6 +47,10 @@ router.use('/slots', auth, tenantMiddleware, slotRoutes);
 router.use('/payments', auth, tenantMiddleware, paymentRoutes);
 router.use('/reminders', auth, tenantMiddleware, reminderRoutes);
 router.use('/dashboard', auth, tenantMiddleware, dashboardRoutes);
+router.use('/calendar-insights', auth, tenantMiddleware, calendarInsightsRoutes);
+router.use('/notifications', auth, tenantMiddleware, notificationRoutes);
+router.use('/inventory', auth, tenantMiddleware, inventoryRoutes);
+router.use('/employees', auth, tenantMiddleware, employeeRoutes);
 
 // GST & Invoice routes (Phase 2)
 router.use('/business-config', auth, tenantMiddleware, businessConfigRoutes);
@@ -103,6 +111,9 @@ router.get('/', (req, res) => {
       payments: `${baseUrl}/api/payments`,
       reminders: `${baseUrl}/api/reminders`,
       dashboard: `${baseUrl}/api/dashboard`,
+      calendarInsights: `${baseUrl}/api/calendar-insights`,
+      inventory: `${baseUrl}/api/inventory`,
+      employees: `${baseUrl}/api/employees`,
       businessConfig: `${baseUrl}/api/business-config`,
       services: `${baseUrl}/api/services`,
       invoices: `${baseUrl}/api/invoices`,

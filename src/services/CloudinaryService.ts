@@ -6,6 +6,7 @@
 import { v2 as cloudinary } from 'cloudinary';
 import { UploadApiResponse } from 'cloudinary';
 import { sanitizeLogValue } from '../utils/logger';
+import { cloudinaryReadiness } from '../utils/integrationReadiness';
 
 // Configure Cloudinary
 cloudinary.config({
@@ -25,6 +26,19 @@ export interface UploadResult {
 }
 
 export class CloudinaryService {
+  private assertConfigured(action: string): void {
+    const readiness = cloudinaryReadiness();
+    if (readiness.status !== 'configured') {
+      const error = new Error(
+        `Storage is not configured for ${action}. Ask the platform owner to configure Cloudinary.`
+      ) as Error & { statusCode?: number; code?: string; missing?: string[] };
+      error.statusCode = 503;
+      error.code = 'STORAGE_NOT_CONFIGURED';
+      error.missing = readiness.missing;
+      throw error;
+    }
+  }
+
   /**
    * Upload image to Cloudinary
    * @param filePath - Local file path or base64 string
@@ -36,6 +50,7 @@ export class CloudinaryService {
     folder: string = 'hallsync/halls',
     options: any = {}
   ): Promise<UploadResult> {
+    this.assertConfigured('image upload');
     try {
       const result: UploadApiResponse = await cloudinary.uploader.upload(filePath, {
         folder,
@@ -81,6 +96,7 @@ export class CloudinaryService {
    * @param publicId - Cloudinary public ID
    */
   async deleteImage(publicId: string): Promise<void> {
+    if (!this.isConfigured()) return;
     try {
       await cloudinary.uploader.destroy(publicId);
     } catch (error: any) {
@@ -106,6 +122,7 @@ export class CloudinaryService {
    * @param height - Thumbnail height
    */
   getThumbnailUrl(publicId: string, width: number = 300, height: number = 200): string {
+    if (!this.isConfigured()) return publicId;
     return cloudinary.url(publicId, {
       width,
       height,
@@ -127,6 +144,7 @@ export class CloudinaryService {
       quality?: string | number;
     } = {}
   ): string {
+    if (!this.isConfigured()) return publicId;
     return cloudinary.url(publicId, {
       quality: 'auto',
       fetch_format: 'auto',
@@ -143,6 +161,7 @@ export class CloudinaryService {
     file: Express.Multer.File,
     folder: string = 'hallsync/uploads'
   ): Promise<string> {
+    this.assertConfigured('file upload');
     return new Promise((resolve, reject) => {
       const uploadStream = cloudinary.uploader.upload_stream(
         {
@@ -179,6 +198,7 @@ export class CloudinaryService {
     file: Express.Multer.File,
     folder: string
   ): Promise<{ publicId: string }> {
+    this.assertConfigured('payment proof upload');
     return new Promise((resolve, reject) => {
       const uploadStream = cloudinary.uploader.upload_stream(
         {
@@ -220,6 +240,7 @@ export class CloudinaryService {
     publicIdOrLegacyUrl: string,
     ttlSeconds = 900
   ): { signedUrl: string; expiresAt: string } {
+    this.assertConfigured('signed proof URL generation');
     // Backwards-compat: if a legacy full URL is stored, extract the public_id.
     // Cloudinary URLs look like: https://res.cloudinary.com/<cloud>/image/upload/[v12345/]<public_id>.<ext>
     const publicId = this.extractPublicId(publicIdOrLegacyUrl);

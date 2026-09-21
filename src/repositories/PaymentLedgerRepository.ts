@@ -14,6 +14,12 @@ export interface LockedInvoiceRow extends RowDataPacket {
   status: string;
 }
 
+const ACTIVE_PAYMENT_STATUS_SQL = `COALESCE(status, 'recorded') NOT IN ('reversed', 'refunded', 'failed')`;
+
+export function isActivePaymentStatus(status?: string | null): boolean {
+  return !['reversed', 'refunded', 'failed'].includes(status || 'recorded');
+}
+
 export function roundMoney(value: number): number {
   return Math.round(value * 100) / 100;
 }
@@ -65,6 +71,48 @@ export async function assertUniqueTransactionReference(
   }
 }
 
+export async function findPaymentByIdempotencyKey(
+  connection: PoolConnection,
+  tenantId: number,
+  idempotencyKey?: string | null
+): Promise<number | null> {
+  if (!idempotencyKey) {
+    return null;
+  }
+
+  const [rows] = await connection.execute<RowDataPacket[]>(
+    `SELECT id
+     FROM payments
+     WHERE tenant_id = ? AND idempotency_key = ?
+     LIMIT 1`,
+    [tenantId, idempotencyKey]
+  );
+
+  return rows[0]?.id ? Number(rows[0].id) : null;
+}
+
+export async function generatePaymentReceiptNumber(
+  connection: PoolConnection,
+  tenantId: number
+): Promise<string> {
+  const datePrefix = new Date().toISOString().slice(0, 7).replace('-', '');
+  const [rows] = await connection.execute<RowDataPacket[]>(
+    `SELECT receipt_number
+     FROM payments
+     WHERE tenant_id = ? AND receipt_number LIKE ?
+     ORDER BY id DESC
+     LIMIT 1`,
+    [tenantId, `RCPT-${datePrefix}-T${tenantId}-%`]
+  );
+
+  const lastReceipt = rows[0]?.receipt_number;
+  const nextSequence = lastReceipt
+    ? Number(String(lastReceipt).split('-').pop() || '0') + 1
+    : 1;
+
+  return `RCPT-${datePrefix}-T${tenantId}-${String(nextSequence).padStart(4, '0')}`;
+}
+
 export async function insertBookingPayment(
   connection: PoolConnection,
   data: {
@@ -77,13 +125,17 @@ export async function insertBookingPayment(
     paymentDate: string | Date;
     notes?: string | null;
     receivedBy?: number | null;
+    status?: string;
+    idempotencyKey?: string | null;
+    receiptNumber?: string | null;
   }
 ): Promise<number> {
   const [paymentResult] = await connection.execute<ResultSetHeader>(
     `INSERT INTO payments (
       tenant_id, booking_id, amount, payment_mode, payment_type,
-      transaction_id, payment_date, notes, received_by
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      transaction_id, payment_date, notes, received_by, status,
+      idempotency_key, receipt_number
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       data.tenantId,
       data.bookingId,
@@ -94,6 +146,9 @@ export async function insertBookingPayment(
       data.paymentDate,
       data.notes || null,
       data.receivedBy || null,
+      data.status || 'recorded',
+      data.idempotencyKey || null,
+      data.receiptNumber || null,
     ]
   );
 
@@ -121,7 +176,8 @@ export async function lockBookingAndValidatePayment(
   const [paymentRows] = await connection.execute<RowDataPacket[]>(
     `SELECT COALESCE(SUM(amount), 0) AS total_paid
      FROM payments
-     WHERE booking_id = ? AND tenant_id = ?`,
+     WHERE booking_id = ? AND tenant_id = ?
+       AND ${ACTIVE_PAYMENT_STATUS_SQL}`,
     [bookingId, tenantId]
   );
   const totalPaid = Number(paymentRows[0]?.total_paid || 0);
@@ -133,6 +189,41 @@ export async function lockBookingAndValidatePayment(
   }
 
   return { totalAmount, updatedTotalPaid };
+}
+
+export async function recalculateBookingPaymentTotals(
+  connection: PoolConnection,
+  tenantId: number,
+  bookingId: number
+): Promise<{ totalAmount: number; totalPaid: number; balanceAmount: number }> {
+  const [bookingRows] = await connection.execute<RowDataPacket[]>(
+    `SELECT id, total_amount
+     FROM bookings
+     WHERE id = ? AND tenant_id = ?
+     FOR UPDATE`,
+    [bookingId, tenantId]
+  );
+  const booking = bookingRows[0];
+  if (!booking) {
+    throw new Error('Booking not found');
+  }
+
+  const [paymentRows] = await connection.execute<RowDataPacket[]>(
+    `SELECT COALESCE(SUM(amount), 0) AS total_paid
+     FROM payments
+     WHERE booking_id = ? AND tenant_id = ?
+       AND ${ACTIVE_PAYMENT_STATUS_SQL}`,
+    [bookingId, tenantId]
+  );
+  const totalAmount = Number(booking.total_amount);
+  const totalPaid = roundMoney(Number(paymentRows[0]?.total_paid || 0));
+  await updateBookingPaymentTotals(connection, tenantId, bookingId, totalAmount, totalPaid);
+
+  return {
+    totalAmount,
+    totalPaid,
+    balanceAmount: roundMoney(totalAmount - totalPaid),
+  };
 }
 
 export async function updateBookingPaymentTotals(
@@ -216,6 +307,17 @@ export async function allocatePaymentToInvoices(
 ): Promise<void> {
   for (const allocation of allocations) {
     const amount = validatePositiveMoney(Number(allocation.amount), 'Allocation amount');
+    const [invRows] = await connection.execute<RowDataPacket[]>(
+      `SELECT id, status, invoice_number FROM invoices WHERE id = ? AND tenant_id = ?`,
+      [allocation.invoice_id, tenantId]
+    );
+    if (!invRows[0]) {
+      throw new Error('Invoice not found');
+    }
+    if (['cancelled', 'void'].includes(invRows[0].status)) {
+      throw new Error(`Cannot record payment against ${invRows[0].status} invoice ${invRows[0].invoice_number}`);
+    }
+
     await connection.execute(
       `INSERT INTO invoice_payment_allocations (
         tenant_id, invoice_id, payment_id, amount
@@ -225,25 +327,21 @@ export async function allocatePaymentToInvoices(
     await connection.execute(
       `UPDATE invoices
        SET amount_paid = ROUND(amount_paid + ?, 2),
-           balance_amount = ROUND(balance_amount - ?, 2),
+           balance_amount = GREATEST(ROUND(grand_total - amount_paid, 2), 0),
            payment_status = CASE
-             WHEN ROUND(balance_amount - ?, 2) <= 0 THEN 'paid'
-             WHEN ROUND(amount_paid + ?, 2) > 0 THEN 'partial'
+             WHEN amount_paid >= grand_total THEN 'paid'
+             WHEN amount_paid > 0 THEN 'partial'
              ELSE 'unpaid'
            END,
            status = CASE
-             WHEN ROUND(balance_amount - ?, 2) <= 0 THEN 'paid'
-             WHEN ROUND(amount_paid + ?, 2) > 0 THEN 'partially_paid'
+             WHEN status IN ('cancelled', 'void') THEN status
+             WHEN amount_paid >= grand_total THEN 'paid'
+             WHEN amount_paid > 0 THEN 'partially_paid'
              ELSE status
            END,
            updated_at = NOW()
        WHERE id = ? AND tenant_id = ?`,
       [
-        amount,
-        amount,
-        amount,
-        amount,
-        amount,
         amount,
         allocation.invoice_id,
         tenantId,
@@ -295,13 +393,17 @@ export async function allocateExistingBookingPaymentsToInvoice(
 ): Promise<void> {
   let remainingInvoiceBalance = roundMoney(invoiceBalance);
   const [paymentRows] = await connection.execute<RowDataPacket[]>(
-    `SELECT p.id, p.amount, COALESCE(SUM(ipa.amount), 0) AS allocated_amount
+    `SELECT p.id, p.amount, COALESCE(SUM(CASE WHEN i.id IS NOT NULL AND i.status NOT IN ('cancelled', 'void') THEN ipa.amount ELSE 0 END), 0) AS allocated_amount
      FROM payments p
      LEFT JOIN invoice_payment_allocations ipa
        ON ipa.payment_id = p.id
       AND ipa.tenant_id = p.tenant_id
+     LEFT JOIN invoices i
+       ON i.id = ipa.invoice_id
+      AND i.tenant_id = ipa.tenant_id
      WHERE p.tenant_id = ?
        AND p.booking_id = ?
+       AND ${ACTIVE_PAYMENT_STATUS_SQL.replace(/status/g, 'p.status')}
      GROUP BY p.id, p.amount
      HAVING ROUND(p.amount - allocated_amount, 2) > 0
      ORDER BY p.payment_date ASC, p.id ASC`,
@@ -322,5 +424,72 @@ export async function allocateExistingBookingPaymentsToInvoice(
       { invoice_id: invoiceId, amount: allocationAmount },
     ]);
     remainingInvoiceBalance = roundMoney(remainingInvoiceBalance - allocationAmount);
+  }
+}
+
+export async function syncBookingInvoiceBalances(
+  connection: PoolConnection,
+  tenantId: number,
+  bookingId: number
+): Promise<void> {
+  const [invoices] = await connection.execute<RowDataPacket[]>(
+    `SELECT id, grand_total, status
+     FROM invoices
+     WHERE tenant_id = ?
+       AND booking_id = ?
+       AND status NOT IN ('cancelled', 'void')
+     ORDER BY invoice_date ASC, id ASC
+     FOR UPDATE`,
+    [tenantId, bookingId]
+  );
+
+  if (invoices.length === 0) return;
+
+  const invoiceIds = invoices.map((inv) => Number(inv.id));
+  const placeholders = invoiceIds.map(() => '?').join(', ');
+  await connection.execute(
+    `DELETE FROM invoice_payment_allocations
+     WHERE tenant_id = ? AND invoice_id IN (${placeholders})`,
+    [tenantId, ...invoiceIds]
+  );
+
+  for (const inv of invoices) {
+    await connection.execute(
+      `UPDATE invoices
+       SET amount_paid = 0,
+           balance_amount = grand_total,
+           payment_status = 'unpaid',
+           status = CASE WHEN status IN ('paid', 'partially_paid') THEN 'issued' ELSE status END,
+           updated_at = NOW()
+       WHERE id = ? AND tenant_id = ?`,
+      [inv.id, tenantId]
+    );
+  }
+
+  for (const inv of invoices) {
+    await allocateExistingBookingPaymentsToInvoice(
+      connection,
+      tenantId,
+      bookingId,
+      Number(inv.id),
+      Number(inv.grand_total)
+    );
+  }
+}
+
+export async function syncAllBookingInvoiceBalances(
+  connection: PoolConnection,
+  tenantId: number
+): Promise<void> {
+  const [bookingRows] = await connection.execute<RowDataPacket[]>(
+    `SELECT DISTINCT booking_id
+     FROM invoices
+     WHERE tenant_id = ? AND booking_id IS NOT NULL AND status NOT IN ('cancelled', 'void')`,
+    [tenantId]
+  );
+  for (const row of bookingRows) {
+    if (row.booking_id) {
+      await syncBookingInvoiceBalances(connection, tenantId, Number(row.booking_id));
+    }
   }
 }

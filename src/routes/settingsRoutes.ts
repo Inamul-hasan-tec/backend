@@ -1,9 +1,11 @@
-import { Router } from 'express';
+import { NextFunction, Response, Router } from 'express';
 import { SettingsController } from '../controllers/SettingsController';
 import { requirePermission } from '../middleware/permissionMiddleware';
 import { Permission } from '../types/permissions';
 import InvitationController from '../controllers/InvitationController';
 import multer from 'multer';
+import { TenantRequest } from '../middleware/tenantMiddleware';
+import { runWithTenantContext } from '../utils/tenantContext';
 
 const router = Router();
 const settingsController = new SettingsController();
@@ -13,6 +15,28 @@ const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 2 * 1024 * 1024 } // 2MB
 });
+
+const bindTenantContext = (
+  req: TenantRequest,
+  res: Response,
+  next: NextFunction
+) => {
+  if (!req.user || !req.tenantId) {
+    return res.status(403).json({
+      success: false,
+      error: 'Tenant context is required for settings operations.',
+    });
+  }
+
+  return runWithTenantContext(
+    {
+      tenantId: req.tenantId,
+      userId: req.user.id,
+      role: req.user.role,
+    },
+    next
+  );
+};
 
 // ============================================
 // Personal Settings
@@ -51,6 +75,7 @@ router.post(
   '/business/logo',
   requirePermission(Permission.SETTINGS_UPDATE),
   upload.single('logo'),
+  bindTenantContext,
   settingsController.uploadBusinessLogo.bind(settingsController)
 );
 
@@ -73,6 +98,18 @@ router.post(
   '/team/invitations/:id/resend',
   requirePermission(Permission.USER_CREATE),
   InvitationController.resend.bind(InvitationController)
+);
+
+router.delete(
+  '/team/invitations/:id',
+  requirePermission(Permission.USER_CREATE),
+  InvitationController.revoke.bind(InvitationController)
+);
+
+router.post(
+  '/team/invitations/:id/revoke',
+  requirePermission(Permission.USER_CREATE),
+  InvitationController.revoke.bind(InvitationController)
 );
 
 router.get(
@@ -100,8 +137,29 @@ router.delete(
 );
 
 // ============================================
+// Operations Settings
+// ============================================
+router.get(
+  '/operations',
+  requirePermission(Permission.SETTINGS_VIEW),
+  settingsController.getOperationSettings.bind(settingsController)
+);
+
+router.put(
+  '/operations',
+  requirePermission(Permission.SETTINGS_UPDATE),
+  settingsController.updateOperationSettings.bind(settingsController)
+);
+
+// ============================================
 // Billing & Subscription
 // ============================================
+router.get(
+  '/subscription/plans',
+  requirePermission(Permission.SETTINGS_VIEW),
+  settingsController.getSubscriptionPlans.bind(settingsController)
+);
+
 router.get(
   '/subscription',
   requirePermission(Permission.SETTINGS_VIEW),
@@ -121,9 +179,16 @@ router.post(
 );
 
 router.post(
+  '/subscription/order',
+  requirePermission(Permission.SETTINGS_UPDATE),
+  settingsController.createSubscriptionOrder.bind(settingsController)
+);
+
+router.post(
   '/subscription/payment',
   requirePermission(Permission.SETTINGS_UPDATE),
   upload.single('payment_proof'),
+  bindTenantContext,
   settingsController.submitPayment.bind(settingsController)
 );
 

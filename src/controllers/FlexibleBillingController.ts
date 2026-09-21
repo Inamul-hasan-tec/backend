@@ -224,34 +224,15 @@ export class FlexibleBillingController {
    * Query params: ?active_only=true (optional, default: false)
    */
   static async getDiscountTemplates(req: Request, res: Response) {
-    try {
-      const tenantId = getTenantId();
-      // Check if we should filter by active only
-      const activeOnly = req.query.active_only === 'true';
-      
-      let query = 'SELECT * FROM discount_templates WHERE tenant_id = ?';
-      const params: any[] = [tenantId];
-      
-      if (activeOnly) {
-        query += ' AND is_active = 1';
-      }
-      
-      query += ' ORDER BY name';
-
-      const [rows] = await pool.query<RowDataPacket[]>(query, params);
-
-      res.json({
-        success: true,
-        data: rows
-      });
-    } catch (error: any) {
-      console.error('Error fetching discount templates:', error);
-      res.status(500).json({
-        success: false,
-        message: 'Failed to fetch discount templates',
-        error: error.message
-      });
-    }
+    // Discount templates were an early flexible-billing idea, but the current
+    // production invoice builder uses simple per-invoice discounts instead.
+    // Keep this endpoint safe for older clients without requiring an unused
+    // discount_templates table in production.
+    res.json({
+      success: true,
+      data: [],
+      message: 'Reusable discount templates are currently disabled. Use the invoice builder discount section.'
+    });
   }
 
   /**
@@ -259,38 +240,10 @@ export class FlexibleBillingController {
    * POST /api/discount-templates
    */
   static async createDiscountTemplate(req: Request, res: Response) {
-    try {
-      const tenantId = getTenantId();
-      const {
-        name,
-        description,
-        discount_type,
-        discount_value,
-        reason_template
-      } = req.body;
-
-      const [result] = await pool.query<ResultSetHeader>(
-        `INSERT INTO discount_templates 
-         (tenant_id, name, description, discount_type, discount_value, reason_template)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-        [tenantId, name, description, discount_type, discount_value, reason_template]
-      );
-
-      res.status(201).json({
-        success: true,
-        message: 'Discount template created successfully',
-        data: {
-          id: result.insertId
-        }
-      });
-    } catch (error: any) {
-      console.error('Error creating discount template:', error);
-      res.status(500).json({
-        success: false,
-        message: 'Failed to create discount template',
-        error: error.message
-      });
-    }
+    res.status(410).json({
+      success: false,
+      message: 'Reusable discount templates are disabled. Apply discounts directly while creating an estimate or invoice.'
+    });
   }
 
   /**
@@ -298,75 +251,10 @@ export class FlexibleBillingController {
    * PUT /api/discount-templates/:id
    */
   static async updateDiscountTemplate(req: Request, res: Response) {
-    try {
-      const tenantId = getTenantId();
-      const templateId = parseInt(req.params.id);
-      const {
-        name,
-        description,
-        discount_type,
-        discount_value,
-        reason_template,
-        is_active
-      } = req.body;
-
-      // Build dynamic update query
-      const updates: string[] = [];
-      const values: any[] = [];
-
-      if (name !== undefined) {
-        updates.push('name = ?');
-        values.push(name);
-      }
-      if (description !== undefined) {
-        updates.push('description = ?');
-        values.push(description);
-      }
-      if (discount_type !== undefined) {
-        updates.push('discount_type = ?');
-        values.push(discount_type);
-      }
-      if (discount_value !== undefined) {
-        updates.push('discount_value = ?');
-        values.push(discount_value);
-      }
-      if (reason_template !== undefined) {
-        updates.push('reason_template = ?');
-        values.push(reason_template);
-      }
-      if (is_active !== undefined) {
-        updates.push('is_active = ?');
-        values.push(is_active);
-      }
-
-      if (updates.length === 0) {
-        return res.status(400).json({
-          success: false,
-          message: 'No fields to update'
-        });
-      }
-
-      values.push(templateId, tenantId);
-
-      await pool.query(
-        `UPDATE discount_templates 
-         SET ${updates.join(', ')}
-         WHERE id = ? AND tenant_id = ?`,
-        values
-      );
-
-      res.json({
-        success: true,
-        message: 'Discount template updated successfully'
-      });
-    } catch (error: any) {
-      console.error('Error updating discount template:', error);
-      res.status(500).json({
-        success: false,
-        message: 'Failed to update discount template',
-        error: error.message
-      });
-    }
+    res.status(410).json({
+      success: false,
+      message: 'Reusable discount templates are disabled. Apply discounts directly while creating an estimate or invoice.'
+    });
   }
 
   /**
@@ -374,27 +262,10 @@ export class FlexibleBillingController {
    * DELETE /api/discount-templates/:id
    */
   static async deleteDiscountTemplate(req: Request, res: Response) {
-    try {
-      const tenantId = getTenantId();
-      const templateId = parseInt(req.params.id);
-
-      await pool.query(
-        'DELETE FROM discount_templates WHERE id = ? AND tenant_id = ?',
-        [templateId, tenantId]
-      );
-
-      res.json({
-        success: true,
-        message: 'Discount template deleted successfully'
-      });
-    } catch (error: any) {
-      console.error('Error deleting discount template:', error);
-      res.status(500).json({
-        success: false,
-        message: 'Failed to delete discount template',
-        error: error.message
-      });
-    }
+    res.status(410).json({
+      success: false,
+      message: 'Reusable discount templates are disabled. Apply discounts directly while creating an estimate or invoice.'
+    });
   }
 
   /**
@@ -538,24 +409,38 @@ export class FlexibleBillingController {
         exclude_complimentary = true
       } = preferences;
 
+      // Get business details
+      const [bizRows] = await pool.query<RowDataPacket[]>(
+        `SELECT business_name, gstin, is_gst_registered, state, state_code
+         FROM business_config WHERE tenant_id = ? LIMIT 1`,
+        [tenantId]
+      );
+      const business = bizRows[0] || null;
+
       let query = `
         SELECT 
           i.id,
           i.invoice_number,
           i.invoice_type,
-          i.invoice_date,
+          DATE_FORMAT(i.invoice_date, '%Y-%m-%d') as invoice_date,
           i.customer_name,
           i.customer_gstin,
+          i.customer_state,
+          i.customer_state_code,
+          i.supply_type,
+          i.place_of_supply,
+          i.place_of_supply_state_code,
+          i.tax_mode,
           i.taxable_amount,
           i.cgst_amount,
           i.sgst_amount,
           i.igst_amount,
           i.total_tax,
           i.grand_total,
-          i.billing_strategy,
-          i.complimentary_value
+          i.status,
+          i.booking_id
         FROM invoices i
-        WHERE i.tenant_id = ? AND i.status != 'cancelled'
+        WHERE i.tenant_id = ? AND i.status NOT IN ('cancelled', 'void')
       `;
 
       const params: any[] = [tenantId];
@@ -570,48 +455,162 @@ export class FlexibleBillingController {
         params.push(to_date);
       }
 
-      // Apply filters based on preferences
       if (!include_advance_receipts) {
         query += " AND i.invoice_type != 'receipt_voucher'";
       }
 
-      if (exclude_complimentary) {
-        query += ' AND (i.complimentary_value IS NULL OR i.complimentary_value = 0)';
-      }
-
       if (b2c_threshold_only) {
-        query += ' AND i.grand_total > 250000'; // B2C threshold
+        query += ' AND i.grand_total > 250000';
       }
 
-      query += ' ORDER BY i.invoice_date, i.invoice_number';
+      query += ' ORDER BY i.invoice_date ASC, i.invoice_number ASC';
 
       const [invoices] = await pool.query<RowDataPacket[]>(query, params);
 
-      // Calculate summary
+      // Fetch HSN / SAC summary for the selected period
+      let hsnQuery = `
+        SELECT 
+          COALESCE(ili.sac_hsn, '998599') as sac_hsn,
+          MAX(ili.description) as description,
+          COUNT(ili.id) as line_count,
+          SUM(ili.quantity) as total_quantity,
+          MAX(ili.unit) as unit,
+          SUM(ili.taxable_value) as taxable_value,
+          SUM(ili.cgst_amount) as cgst_amount,
+          SUM(ili.sgst_amount) as sgst_amount,
+          SUM(ili.igst_amount) as igst_amount,
+          SUM(ili.total_tax) as total_tax,
+          SUM(ili.total_amount) as total_amount
+        FROM invoice_line_items ili
+        INNER JOIN invoices i ON i.id = ili.invoice_id
+        WHERE i.tenant_id = ? AND i.status NOT IN ('cancelled', 'void')
+      `;
+      const hsnParams: any[] = [tenantId];
+      if (from_date) {
+        hsnQuery += ' AND i.invoice_date >= ?';
+        hsnParams.push(from_date);
+      }
+      if (to_date) {
+        hsnQuery += ' AND i.invoice_date <= ?';
+        hsnParams.push(to_date);
+      }
+      hsnQuery += ' GROUP BY COALESCE(ili.sac_hsn, "998599") ORDER BY taxable_value DESC';
+
+      const [hsnRows] = await pool.query<RowDataPacket[]>(hsnQuery, hsnParams);
+
+      // Segment into GSTR-1 style groups
+      const b2bInvoices = invoices.filter(
+        (inv) =>
+          inv.customer_gstin &&
+          inv.customer_gstin.trim().length === 15 &&
+          inv.invoice_type === 'tax_invoice'
+      );
+
+      const b2cLargeInvoices = invoices.filter(
+        (inv) =>
+          (!inv.customer_gstin || inv.customer_gstin.trim().length !== 15) &&
+          inv.supply_type === 'interstate' &&
+          Number(inv.grand_total || 0) > 250000 &&
+          inv.invoice_type === 'tax_invoice'
+      );
+
+      const b2cSmallInvoices = invoices.filter(
+        (inv) =>
+          (!inv.customer_gstin || inv.customer_gstin.trim().length !== 15) &&
+          !(inv.supply_type === 'interstate' && Number(inv.grand_total || 0) > 250000) &&
+          inv.invoice_type === 'tax_invoice'
+      );
+
+      const creditDebitNotes = invoices.filter(
+        (inv) => inv.invoice_type === 'credit_note' || inv.invoice_type === 'debit_note'
+      );
+
+      const otherVouchers = invoices.filter(
+        (inv) => inv.invoice_type === 'receipt_voucher'
+      );
+
+      // Pre-export exception diagnostics
+      const missingPosInvoices = invoices.filter(
+        (inv) => !inv.place_of_supply_state_code || String(inv.place_of_supply_state_code).trim() === ''
+      );
+
+      const suspiciousGstinInvoices = invoices.filter(
+        (inv) =>
+          inv.customer_gstin &&
+          inv.customer_gstin.trim().length > 0 &&
+          inv.customer_gstin.trim().length !== 15
+      );
+
+      const diagnostics = {
+        venue_gst_registered: Boolean(business?.is_gst_registered && business?.gstin),
+        venue_gstin: business?.gstin || null,
+        missing_place_of_supply_count: missingPosInvoices.length,
+        missing_pos_invoice_numbers: missingPosInvoices.map((inv) => inv.invoice_number),
+        suspicious_gstin_count: suspiciousGstinInvoices.length,
+        suspicious_gstin_invoice_numbers: suspiciousGstinInvoices.map((inv) => inv.invoice_number),
+      };
+
+      // Calculate overall summary
       const summary = invoices.reduce((acc: any, inv: any) => ({
         total_invoices: acc.total_invoices + 1,
-        total_taxable_value: acc.total_taxable_value + parseFloat(inv.taxable_amount || 0),
-        total_cgst: acc.total_cgst + parseFloat(inv.cgst_amount || 0),
-        total_sgst: acc.total_sgst + parseFloat(inv.sgst_amount || 0),
-        total_igst: acc.total_igst + parseFloat(inv.igst_amount || 0),
-        total_gst: acc.total_gst + parseFloat(inv.total_tax || 0)
+        total_taxable_value: Math.round((acc.total_taxable_value + parseFloat(inv.taxable_amount || 0)) * 100) / 100,
+        total_cgst: Math.round((acc.total_cgst + parseFloat(inv.cgst_amount || 0)) * 100) / 100,
+        total_sgst: Math.round((acc.total_sgst + parseFloat(inv.sgst_amount || 0)) * 100) / 100,
+        total_igst: Math.round((acc.total_igst + parseFloat(inv.igst_amount || 0)) * 100) / 100,
+        total_gst: Math.round((acc.total_gst + parseFloat(inv.total_tax || 0)) * 100) / 100,
+        total_grand_total: Math.round((acc.total_grand_total + parseFloat(inv.grand_total || 0)) * 100) / 100,
       }), {
         total_invoices: 0,
         total_taxable_value: 0,
         total_cgst: 0,
         total_sgst: 0,
         total_igst: 0,
-        total_gst: 0
+        total_gst: 0,
+        total_grand_total: 0,
       });
 
       res.json({
         success: true,
         data: {
+          title: 'Accountant Review Export - GSTR-1 style grouping',
           period: `${from_date} to ${to_date}`,
           preferences,
           summary,
+          sections: {
+            b2b: {
+              title: 'Table 4: Taxable outward supplies to registered persons (B2B)',
+              count: b2bInvoices.length,
+              invoices: b2bInvoices,
+            },
+            b2c_large: {
+              title: 'Table 5: Taxable outward interstate supplies to unregistered persons > ₹2.5 Lakhs (B2CL)',
+              count: b2cLargeInvoices.length,
+              invoices: b2cLargeInvoices,
+            },
+            b2c_small: {
+              title: 'Table 7: Taxable outward supplies to unregistered persons (B2CS)',
+              count: b2cSmallInvoices.length,
+              invoices: b2cSmallInvoices,
+            },
+            credit_debit_notes: {
+              title: 'Table 9B: Credit / Debit Notes issued to registered & unregistered persons (CDNR/CDNUR)',
+              count: creditDebitNotes.length,
+              invoices: creditDebitNotes,
+            },
+            receipt_vouchers: {
+              title: 'Table 11: Advance Receipts & Vouchers',
+              count: otherVouchers.length,
+              invoices: otherVouchers,
+            },
+            hsn_summary: {
+              title: 'Table 12: HSN/SAC Summary of Outward Supplies',
+              items: hsnRows,
+            },
+          },
           invoices,
-          disclaimer: 'This report is generated based on your invoice records. Please consult your CA for GST filing compliance.'
+          diagnostics,
+          disclaimer:
+            'Accountant Review Export - GSTR-1 style grouping. This document is provided for review, reconciliation, and audit by your Chartered Accountant. It is not an automated statutory filing with the GSTN portal.',
         }
       });
     } catch (error: any) {

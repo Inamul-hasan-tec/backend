@@ -6,17 +6,31 @@
 import { RowDataPacket } from 'mysql2';
 import pool from '../config/db';
 import { SlotRepository } from '../repositories/SlotRepository';
-import { Slot, SlotWithBookingDetails, CreateSlotDTO, UpdateSlotDTO } from '../models/Slot';
+import { Slot, SlotWithBookingDetails, CreateSlotDTO, UpdateSlotDTO, SlotType } from '../models/Slot';
 import { getTenantId } from '../utils/tenantContext';
 import SubscriptionRepository from '../repositories/SubscriptionRepository';
+import TenantRepository from '../repositories/TenantRepository';
 
-const SLOT_TYPES: Array<'morning' | 'afternoon' | 'night'> = ['morning', 'afternoon', 'night'];
+type CalendarSlotMode = 'three_slots' | 'two_slots' | 'full_day';
+const DEFAULT_SLOT_MODE: CalendarSlotMode = 'three_slots';
+const SLOT_TYPES_BY_MODE: Record<CalendarSlotMode, SlotType[]> = {
+  three_slots: ['morning', 'afternoon', 'night'],
+  two_slots: ['afternoon', 'night'],
+  full_day: ['full_day'],
+};
 const SLOT_GENERATION_STATUSES = new Set(['trial', 'active']);
 const MAX_PLATFORM_RANGE_DAYS = 731;
 
 const toDateOnly = (value: string | Date): string => {
   if (value instanceof Date) {
-    return value.toISOString().slice(0, 10);
+    const year = value.getFullYear();
+    const month = String(value.getMonth() + 1).padStart(2, '0');
+    const day = String(value.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+  const dateOnly = value.slice(0, 10);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dateOnly)) {
+    return dateOnly;
   }
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
     throw new Error('Date must be in YYYY-MM-DD format');
@@ -38,11 +52,67 @@ const daysBetweenInclusive = (from: string, to: string): number => {
   return Math.floor((end - start) / 86400000) + 1;
 };
 
+const normalizeSlotMode = (value?: string | null): CalendarSlotMode => {
+  if (value === 'two_slots' || value === 'full_day' || value === 'three_slots') {
+    return value;
+  }
+  return DEFAULT_SLOT_MODE;
+};
+
+interface SlotEntitlementWindow {
+  canUseSlots: boolean;
+  subscriptionEnd?: string;
+  reason?: string;
+}
+
 export class SlotService {
   private slotRepository: SlotRepository;
 
   constructor() {
     this.slotRepository = new SlotRepository();
+  }
+
+  private async getSlotTypesForTenant(tenantId: number): Promise<SlotType[]> {
+    const mode = normalizeSlotMode(
+      await TenantRepository.getSetting(tenantId, 'calendar_slot_mode')
+    );
+    return SLOT_TYPES_BY_MODE[mode];
+  }
+
+  private async getSlotEntitlementWindow(tenantId: number): Promise<SlotEntitlementWindow> {
+    const subscription = await SubscriptionRepository.ensureTrialSubscription(tenantId);
+    const [tenantRows] = await pool.execute<RowDataPacket[]>(
+      'SELECT status FROM tenants WHERE id = ? LIMIT 1',
+      [tenantId]
+    );
+    const tenantStatus = tenantRows[0]?.status || 'inactive';
+    const subscriptionStatus = subscription?.status || 'inactive';
+    const subscriptionEnd = subscription?.current_period_end
+      ? toDateOnly(new Date(subscription.current_period_end))
+      : undefined;
+
+    if (!SLOT_GENERATION_STATUSES.has(tenantStatus) || !SLOT_GENERATION_STATUSES.has(subscriptionStatus)) {
+      return {
+        canUseSlots: false,
+        subscriptionEnd,
+        reason: `Tenant/subscription status is not eligible for slot access (${tenantStatus}/${subscriptionStatus})`,
+      };
+    }
+
+    if (!subscriptionEnd) {
+      return { canUseSlots: false, reason: 'Subscription period is unavailable' };
+    }
+
+    const today = toDateOnly(new Date());
+    if (daysBetweenInclusive(today, subscriptionEnd) < 1) {
+      return {
+        canUseSlots: false,
+        subscriptionEnd,
+        reason: 'Subscription period has ended',
+      };
+    }
+
+    return { canUseSlots: true, subscriptionEnd };
   }
 
   /**
@@ -55,6 +125,23 @@ export class SlotService {
     hallId?: number
   ): Promise<SlotWithBookingDetails[]> {
     const tenantId = getTenantId();
+    const monthStart = `${year}-${String(month).padStart(2, '0')}-01`;
+    const nextMonth = month === 12 ? 1 : month + 1;
+    const nextMonthYear = month === 12 ? year + 1 : year;
+    const monthEndExclusive = `${nextMonthYear}-${String(nextMonth).padStart(2, '0')}-01`;
+
+    await this.ensureSubscriptionSlotsForRequestedMonth(tenantId, year, month, hallId);
+    const entitlement = await this.getSlotEntitlementWindow(tenantId);
+
+    if (!entitlement.canUseSlots || !entitlement.subscriptionEnd || monthStart > entitlement.subscriptionEnd) {
+      return [];
+    }
+
+    const effectiveMonthEndExclusive =
+      monthEndExclusive <= entitlement.subscriptionEnd
+        ? monthEndExclusive
+        : addDays(parseDateOnly(entitlement.subscriptionEnd), 1).toISOString().slice(0, 10);
+
     const sql = `
       SELECT 
         s.id,
@@ -74,13 +161,13 @@ export class SlotService {
       LEFT JOIN customers c ON b.customer_id = c.id AND c.tenant_id = s.tenant_id
       LEFT JOIN packages p ON b.package_id = p.id AND p.tenant_id = s.tenant_id
       WHERE s.tenant_id = ?
-        AND YEAR(s.slot_date) = ?
-        AND MONTH(s.slot_date) = ?
+        AND s.slot_date >= ?
+        AND s.slot_date < ?
         ${hallId ? 'AND s.hall_id = ?' : ''}
       ORDER BY s.slot_date, s.slot_type
     `;
 
-    const params: any[] = [tenantId, year, month];
+    const params: any[] = [tenantId, monthStart, effectiveMonthEndExclusive];
     if (hallId) {
       params.push(hallId);
     }
@@ -111,6 +198,58 @@ export class SlotService {
     }));
   }
 
+  private shouldGenerateMissingSlots(year: number, month: number): boolean {
+    const today = new Date();
+    const requestedMonthEnd = new Date(Date.UTC(year, month, 0));
+    const todayDateOnly = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()));
+    return requestedMonthEnd >= todayDateOnly;
+  }
+
+  private getSubscriptionGenerationStart(year: number, month: number): string | null {
+    if (!this.shouldGenerateMissingSlots(year, month)) {
+      return null;
+    }
+
+    const today = new Date();
+    const todayDateOnly = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()));
+    const monthStart = new Date(Date.UTC(year, month - 1, 1));
+    const generationStart = monthStart > todayDateOnly ? monthStart : todayDateOnly;
+
+    return generationStart.toISOString().slice(0, 10);
+  }
+
+  /**
+   * Calendar reads are allowed to self-heal missing future slots. This keeps
+   * slot generation tied to subscription validity instead of each screen
+   * manually creating one month at a time.
+   */
+  private async ensureSubscriptionSlotsForRequestedMonth(
+    tenantId: number,
+    year: number,
+    month: number,
+    hallId?: number
+  ): Promise<void> {
+    const generationStart = this.getSubscriptionGenerationStart(year, month);
+    if (!generationStart) return;
+
+    try {
+      if (hallId) {
+        await this.generateSlotsForHallUntilSubscriptionEnd(tenantId, hallId, generationStart);
+        return;
+      }
+
+      await this.generateSlotsForTenantUntilSubscriptionEnd(tenantId, generationStart);
+    } catch (error) {
+      console.warn('Slot self-healing skipped during calendar read:', {
+        tenantId,
+        hallId,
+        year,
+        month,
+        error: error instanceof Error ? error.message : error,
+      });
+    }
+  }
+
   /**
    * Update slot status
    * Used when admin changes slot status or when booking is created
@@ -136,15 +275,26 @@ export class SlotService {
     return await this.slotRepository.findById(id);
   }
 
+  async isDateWithinCurrentTenantSlotEntitlement(date: string): Promise<boolean> {
+    const tenantId = getTenantId();
+    const entitlement = await this.getSlotEntitlementWindow(tenantId);
+    const dateOnly = toDateOnly(date);
+    return Boolean(entitlement.canUseSlots && entitlement.subscriptionEnd && dateOnly <= entitlement.subscriptionEnd);
+  }
+
   /**
    * Check if a specific slot is available
    */
   async isSlotAvailable(
     hallId: number,
     date: string,
-    slotType: 'morning' | 'afternoon' | 'night'
+    slotType: SlotType
   ): Promise<boolean> {
     const tenantId = getTenantId();
+    const entitlement = await this.getSlotEntitlementWindow(tenantId);
+    if (!entitlement.canUseSlots || !entitlement.subscriptionEnd || date > entitlement.subscriptionEnd) {
+      return false;
+    }
     const sql = `
       SELECT COUNT(*) as count
       FROM slots
@@ -165,9 +315,13 @@ export class SlotService {
   async getSlotByHallDateType(
     hallId: number,
     date: string,
-    slotType: 'morning' | 'afternoon' | 'night'
+    slotType: SlotType
   ): Promise<Slot | null> {
     const tenantId = getTenantId();
+    const entitlement = await this.getSlotEntitlementWindow(tenantId);
+    if (!entitlement.canUseSlots || !entitlement.subscriptionEnd || date > entitlement.subscriptionEnd) {
+      return null;
+    }
     const sql = `
       SELECT *
       FROM slots
@@ -206,10 +360,12 @@ export class SlotService {
     const daysInMonth = new Date(year, month, 0).getDate();
     let createdCount = 0;
 
+    const slotTypes = await this.getSlotTypesForTenant(tenantId);
+
     for (let day = 1; day <= daysInMonth; day++) {
       const date = `${year}-${month.toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}`;
 
-      for (const slotType of SLOT_TYPES) {
+      for (const slotType of slotTypes) {
         // Check if slot already exists
         const existing = await this.getSlotByHallDateType(hallId, date, slotType);
 
@@ -232,10 +388,10 @@ export class SlotService {
   }
 
   /**
-   * Generate exactly three daily slots for a hall between two dates.
+   * Generate daily slots for a hall between two dates using the tenant's slot mode.
    *
    * This method is intentionally idempotent: existing slots are never updated,
-   * deleted, or overwritten. It only creates missing morning/afternoon/night
+   * deleted, or overwritten. It only creates missing configured
    * slots, preserving booked and manually blocked inventory.
    */
   async generateSlotsForHallRange(
@@ -267,22 +423,34 @@ export class SlotService {
     }
 
     let createdCount = 0;
+    const slotTypes = await this.getSlotTypesForTenant(tenantId);
     let cursor = parseDateOnly(from);
+
+    const values: any[] = [];
+    const placeholders: string[] = [];
 
     for (let day = 0; day < totalDays; day++) {
       const slotDate = cursor.toISOString().slice(0, 10);
 
-      for (const slotType of SLOT_TYPES) {
-        const [result] = await pool.execute<any>(
-          `INSERT IGNORE INTO slots
-           (tenant_id, hall_id, slot_date, slot_type, status, created_at, updated_at)
-           VALUES (?, ?, ?, ?, 'available', NOW(), NOW())`,
-          [tenantId, hallId, slotDate, slotType]
-        );
-        createdCount += Number(result.affectedRows || 0);
+      for (const slotType of slotTypes) {
+        placeholders.push('(?, ?, ?, ?, ?, NOW(), NOW())');
+        values.push(tenantId, hallId, slotDate, slotType, 'available');
       }
 
       cursor = addDays(cursor, 1);
+    }
+
+    if (placeholders.length > 0) {
+      const CHUNK_SIZE = 500;
+      for (let i = 0; i < placeholders.length; i += CHUNK_SIZE) {
+        const chunkPlaceholders = placeholders.slice(i, i + CHUNK_SIZE);
+        const chunkValues = values.slice(i * 5, (i + CHUNK_SIZE) * 5);
+        const sql = `INSERT IGNORE INTO slots
+           (tenant_id, hall_id, slot_date, slot_type, status, created_at, updated_at)
+           VALUES ${chunkPlaceholders.join(', ')}`;
+        const [result] = await pool.execute<any>(sql, chunkValues);
+        createdCount += Number(result.affectedRows || 0);
+      }
     }
 
     return { slotsCreated: createdCount, daysProcessed: totalDays };
@@ -298,26 +466,20 @@ export class SlotService {
     hallId: number,
     dateFrom: string | Date = new Date()
   ): Promise<{ slotsCreated: number; daysProcessed: number; skipped: boolean; reason?: string; subscriptionEnd?: string }> {
-    const subscription = await SubscriptionRepository.ensureTrialSubscription(tenantId);
-    const [tenantRows] = await pool.execute<RowDataPacket[]>(
-      'SELECT status FROM tenants WHERE id = ? LIMIT 1',
-      [tenantId]
-    );
-    const tenant = tenantRows[0];
-    const tenantStatus = tenant?.status || 'inactive';
-    const subscriptionStatus = subscription?.status || 'inactive';
+    const entitlement = await this.getSlotEntitlementWindow(tenantId);
 
-    if (!SLOT_GENERATION_STATUSES.has(tenantStatus) || !SLOT_GENERATION_STATUSES.has(subscriptionStatus)) {
+    if (!entitlement.canUseSlots || !entitlement.subscriptionEnd) {
       return {
         slotsCreated: 0,
         daysProcessed: 0,
         skipped: true,
-        reason: `Tenant/subscription status is not eligible for slot generation (${tenantStatus}/${subscriptionStatus})`,
+        reason: entitlement.reason || 'Subscription is not eligible for slot generation',
+        subscriptionEnd: entitlement.subscriptionEnd,
       };
     }
 
     const today = toDateOnly(dateFrom);
-    const subscriptionEnd = toDateOnly(new Date(subscription.current_period_end));
+    const subscriptionEnd = entitlement.subscriptionEnd;
     if (daysBetweenInclusive(today, subscriptionEnd) < 1) {
       return {
         slotsCreated: 0,
@@ -330,6 +492,52 @@ export class SlotService {
 
     const result = await this.generateSlotsForHallRange(tenantId, hallId, today, subscriptionEnd);
     return { ...result, skipped: false, subscriptionEnd };
+  }
+
+  /**
+   * Tenant-facing manual generation for a selected hall/month. It uses the
+   * requested month only as the start point, then fills through subscription
+   * end so the calendar never depends on month-by-month setup.
+   */
+  async generateCurrentTenantHallSlotsFromMonthUntilSubscriptionEnd(
+    year: number,
+    month: number,
+    hallId: number
+  ): Promise<{ slotsCreated: number; daysProcessed: number; skipped: boolean; reason?: string; subscriptionEnd?: string }> {
+    const tenantId = getTenantId();
+    const generationStart = this.getSubscriptionGenerationStart(year, month);
+
+    if (!generationStart) {
+      return {
+        slotsCreated: 0,
+        daysProcessed: 0,
+        skipped: true,
+        reason: 'Requested month is in the past',
+      };
+    }
+
+    return this.generateSlotsForHallUntilSubscriptionEnd(tenantId, hallId, generationStart);
+  }
+
+  /**
+   * Tenant-facing all-hall generation through subscription end.
+   */
+  async generateCurrentTenantSlotsUntilSubscriptionEnd(
+    dateFrom: string | Date = new Date()
+  ): Promise<{ hallsProcessed: number; slotsCreated: number; skipped: boolean; reason?: string; subscriptionEnd?: string }> {
+    return this.generateSlotsForTenantUntilSubscriptionEnd(getTenantId(), dateFrom);
+  }
+
+  async generateCurrentTenantHallSlotsForCurrentMonthUntilSubscriptionEnd(
+    hallId: number
+  ): Promise<{ slotsCreated: number; daysProcessed: number; skipped: boolean; reason?: string; subscriptionEnd?: string }> {
+    const now = new Date();
+    const currentMonthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+    return this.generateSlotsForHallUntilSubscriptionEnd(
+      getTenantId(),
+      hallId,
+      currentMonthStart.toISOString().slice(0, 10)
+    );
   }
 
   /**
@@ -508,6 +716,16 @@ export class SlotService {
     dateTo: string
   ): Promise<Slot[]> {
     const tenantId = getTenantId();
+    const entitlement = await this.getSlotEntitlementWindow(tenantId);
+    if (!entitlement.canUseSlots || !entitlement.subscriptionEnd) {
+      return [];
+    }
+
+    const effectiveDateTo = dateTo <= entitlement.subscriptionEnd ? dateTo : entitlement.subscriptionEnd;
+    if (daysBetweenInclusive(dateFrom, effectiveDateTo) < 1) {
+      return [];
+    }
+
     const sql = `
       SELECT *
       FROM slots
@@ -518,7 +736,7 @@ export class SlotService {
       ORDER BY slot_date, slot_type
     `;
 
-    const [rows] = await pool.execute<RowDataPacket[]>(sql, [hallId, tenantId, dateFrom, dateTo]);
+    const [rows] = await pool.execute<RowDataPacket[]>(sql, [hallId, tenantId, dateFrom, effectiveDateTo]);
     return rows as Slot[];
   }
 
@@ -535,5 +753,145 @@ export class SlotService {
       WHERE id = ? AND tenant_id = ?
     `;
     await pool.execute(sql, [status, notes || null, slotId, tenantId]);
+  }
+
+  /**
+   * Get availability health diagnostics for tenant
+   * Computes expected vs actual slots per active hall up to subscription end
+   */
+  async getAvailabilityHealth(tenantId: number): Promise<{
+    can_use_slots: boolean;
+    subscription_end?: string;
+    slot_mode: CalendarSlotMode;
+    slot_types: SlotType[];
+    active_halls_count: number;
+    days_in_entitlement: number;
+    total_expected_slots: number;
+    total_existing_slots: number;
+    total_missing_slots: number;
+    total_booked_slots: number;
+    total_blocked_slots: number;
+    total_vacant_slots: number;
+    status: 'healthy' | 'needs_repair' | 'subscription_ended';
+    halls: Array<{
+      id: number;
+      name: string;
+      expected_slots: number;
+      existing_slots: number;
+      missing_slots: number;
+      vacant_slots: number;
+      booked_slots: number;
+      blocked_slots: number;
+    }>;
+  }> {
+    const entitlement = await this.getSlotEntitlementWindow(tenantId);
+    const slotMode = normalizeSlotMode(
+      await TenantRepository.getSetting(tenantId, 'calendar_slot_mode')
+    );
+    const slotTypes = SLOT_TYPES_BY_MODE[slotMode];
+
+    const [hallRows] = await pool.execute<RowDataPacket[]>(
+      'SELECT id, name FROM halls WHERE tenant_id = ? AND is_active = true ORDER BY name ASC',
+      [tenantId]
+    );
+
+    if (!entitlement.canUseSlots || !entitlement.subscriptionEnd) {
+      return {
+        can_use_slots: false,
+        subscription_end: entitlement.subscriptionEnd,
+        slot_mode: slotMode,
+        slot_types: slotTypes,
+        active_halls_count: hallRows.length,
+        days_in_entitlement: 0,
+        total_expected_slots: 0,
+        total_existing_slots: 0,
+        total_missing_slots: 0,
+        total_booked_slots: 0,
+        total_blocked_slots: 0,
+        total_vacant_slots: 0,
+        status: 'subscription_ended',
+        halls: [],
+      };
+    }
+
+    const today = toDateOnly(new Date());
+    const daysInEntitlement = Math.max(0, daysBetweenInclusive(today, entitlement.subscriptionEnd));
+    const expectedSlotsPerHall = daysInEntitlement * slotTypes.length;
+
+    const [slotStats] = await pool.query<RowDataPacket[]>(
+      `SELECT hall_id, status, COUNT(*) as count
+       FROM slots
+       WHERE tenant_id = ?
+         AND slot_date >= ?
+         AND slot_date <= ?
+         AND slot_type IN (?)
+       GROUP BY hall_id, status`,
+      [tenantId, today, entitlement.subscriptionEnd, slotTypes]
+    );
+
+    const statsByHall: Record<number, { vacant: number; booked: number; blocked: number; total: number }> = {};
+    for (const stat of slotStats) {
+      const hallId = Number(stat.hall_id);
+      if (!statsByHall[hallId]) {
+        statsByHall[hallId] = { vacant: 0, booked: 0, blocked: 0, total: 0 };
+      }
+      const count = Number(stat.count || 0);
+      statsByHall[hallId].total += count;
+      if (stat.status === 'vacant' || stat.status === 'available') {
+        statsByHall[hallId].vacant += count;
+      } else if (stat.status === 'booked') {
+        statsByHall[hallId].booked += count;
+      } else if (stat.status === 'blocked') {
+        statsByHall[hallId].blocked += count;
+      }
+    }
+
+    let totalExpected = 0;
+    let totalExisting = 0;
+    let totalMissing = 0;
+    let totalBooked = 0;
+    let totalBlocked = 0;
+    let totalVacant = 0;
+
+    const halls = hallRows.map((hall) => {
+      const hallId = Number(hall.id);
+      const stats = statsByHall[hallId] || { vacant: 0, booked: 0, blocked: 0, total: 0 };
+      const missing = Math.max(0, expectedSlotsPerHall - stats.total);
+
+      totalExpected += expectedSlotsPerHall;
+      totalExisting += stats.total;
+      totalMissing += missing;
+      totalBooked += stats.booked;
+      totalBlocked += stats.blocked;
+      totalVacant += stats.vacant;
+
+      return {
+        id: hallId,
+        name: String(hall.name),
+        expected_slots: expectedSlotsPerHall,
+        existing_slots: stats.total,
+        missing_slots: missing,
+        vacant_slots: stats.vacant,
+        booked_slots: stats.booked,
+        blocked_slots: stats.blocked,
+      };
+    });
+
+    return {
+      can_use_slots: true,
+      subscription_end: entitlement.subscriptionEnd,
+      slot_mode: slotMode,
+      slot_types: slotTypes,
+      active_halls_count: hallRows.length,
+      days_in_entitlement: daysInEntitlement,
+      total_expected_slots: totalExpected,
+      total_existing_slots: totalExisting,
+      total_missing_slots: totalMissing,
+      total_booked_slots: totalBooked,
+      total_blocked_slots: totalBlocked,
+      total_vacant_slots: totalVacant,
+      status: totalMissing === 0 ? 'healthy' : 'needs_repair',
+      halls,
+    };
   }
 }

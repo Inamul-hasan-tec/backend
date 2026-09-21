@@ -1,5 +1,7 @@
 import express from 'express';
 import { FlexibleBillingController } from '../controllers/FlexibleBillingController';
+import { requirePermission } from '../middleware/permissionMiddleware';
+import { Permission } from '../types/permissions';
 
 const router = express.Router();
 
@@ -9,15 +11,15 @@ const router = express.Router();
  */
 
 // Get all discount templates
-router.get('/', FlexibleBillingController.getDiscountTemplates);
+router.get('/', requirePermission(Permission.INVOICE_VIEW), FlexibleBillingController.getDiscountTemplates);
 
 // Create discount template
-router.post('/', FlexibleBillingController.createDiscountTemplate);
+router.post('/', requirePermission(Permission.INVOICE_CREATE), FlexibleBillingController.createDiscountTemplate);
 
 // Update discount template
-router.put('/:id', FlexibleBillingController.updateDiscountTemplate);
+router.put('/:id', requirePermission(Permission.INVOICE_UPDATE), FlexibleBillingController.updateDiscountTemplate);
 
 // Delete discount template
-router.delete('/:id', FlexibleBillingController.deleteDiscountTemplate);
+router.delete('/:id', requirePermission(Permission.INVOICE_DELETE), FlexibleBillingController.deleteDiscountTemplate);
 
 export default router;

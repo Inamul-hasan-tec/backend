@@ -67,6 +67,27 @@ export enum Permission {
   BOOKING_CONFIRM = 'booking:confirm',
   BOOKING_CANCEL = 'booking:cancel',
 
+  // Event Operations
+  OPERATIONS_VIEW = 'operations:view',
+  OPERATIONS_MANAGE = 'operations:manage',
+  OPERATIONS_TASK_UPDATE = 'operations:task_update',
+  OPERATIONS_CLOSEOUT = 'operations:closeout',
+  OPERATIONS_FINANCIAL_READINESS_VIEW = 'operations:financial_readiness_view',
+
+  // Event Inventory
+  EVENT_INVENTORY_VIEW = 'event_inventory:view',
+  EVENT_INVENTORY_MANAGE = 'event_inventory:manage',
+  EVENT_INVENTORY_RESERVE = 'event_inventory:reserve',
+  EVENT_INVENTORY_DISPATCH = 'event_inventory:dispatch',
+  EVENT_INVENTORY_RETURN = 'event_inventory:return',
+  EVENT_INVENTORY_DAMAGE_RECORD = 'event_inventory:damage_record',
+  EVENT_INVENTORY_CLOSEOUT = 'event_inventory:closeout',
+
+  // Inventory Master
+  INVENTORY_ITEM_VIEW = 'inventory_item:view',
+  INVENTORY_ITEM_MANAGE = 'inventory_item:manage',
+  INVENTORY_STOCK_ADJUST = 'inventory:stock_adjust',
+
   // Payment Management
   PAYMENT_CREATE = 'payment:create',
   PAYMENT_UPDATE = 'payment:update',
@@ -105,10 +126,10 @@ export type UserRole = 'super_admin' | 'admin' | 'staff_1' | 'staff_2' | 'viewer
  */
 export const RoleDescriptions: Record<UserRole, string> = {
   super_admin: 'Hall Sync platform owner with no tenant operational access',
-  admin: 'Tenant owner with full access to their tenant',
-  staff_1: 'Senior staff with full operational access',
-  staff_2: 'Junior staff with limited editing capabilities',
-  viewer: 'Read-only access to view data',
+  admin: 'Tenant owner or admin with full booking, finance, settings, operations, and inventory access',
+  staff_1: 'Operations manager with booking, payment, event operations, and inventory control access',
+  staff_2: 'Front desk or floor staff with booking entry, viewing, dispatch, return, and task update access',
+  viewer: 'Read-only access for owners, accountants, auditors, and external review',
 };
 
 // ============================================================
@@ -185,6 +206,27 @@ export const RolePermissions: Record<UserRole, Permission[]> = {
     Permission.BOOKING_CONFIRM,
     Permission.BOOKING_CANCEL,
 
+    // Event Operations
+    Permission.OPERATIONS_VIEW,
+    Permission.OPERATIONS_MANAGE,
+    Permission.OPERATIONS_TASK_UPDATE,
+    Permission.OPERATIONS_CLOSEOUT,
+    Permission.OPERATIONS_FINANCIAL_READINESS_VIEW,
+
+    // Event Inventory
+    Permission.EVENT_INVENTORY_VIEW,
+    Permission.EVENT_INVENTORY_MANAGE,
+    Permission.EVENT_INVENTORY_RESERVE,
+    Permission.EVENT_INVENTORY_DISPATCH,
+    Permission.EVENT_INVENTORY_RETURN,
+    Permission.EVENT_INVENTORY_DAMAGE_RECORD,
+    Permission.EVENT_INVENTORY_CLOSEOUT,
+
+    // Inventory Master
+    Permission.INVENTORY_ITEM_VIEW,
+    Permission.INVENTORY_ITEM_MANAGE,
+    Permission.INVENTORY_STOCK_ADJUST,
+
     // Payment Management
     Permission.PAYMENT_CREATE,
     Permission.PAYMENT_UPDATE,
@@ -244,6 +286,27 @@ export const RolePermissions: Record<UserRole, Permission[]> = {
     Permission.BOOKING_CONFIRM,
     Permission.BOOKING_CANCEL,
 
+    // Event Operations
+    Permission.OPERATIONS_VIEW,
+    Permission.OPERATIONS_MANAGE,
+    Permission.OPERATIONS_TASK_UPDATE,
+    Permission.OPERATIONS_CLOSEOUT,
+    Permission.OPERATIONS_FINANCIAL_READINESS_VIEW,
+
+    // Event Inventory
+    Permission.EVENT_INVENTORY_VIEW,
+    Permission.EVENT_INVENTORY_MANAGE,
+    Permission.EVENT_INVENTORY_RESERVE,
+    Permission.EVENT_INVENTORY_DISPATCH,
+    Permission.EVENT_INVENTORY_RETURN,
+    Permission.EVENT_INVENTORY_DAMAGE_RECORD,
+    Permission.EVENT_INVENTORY_CLOSEOUT,
+
+    // Inventory Master
+    Permission.INVENTORY_ITEM_VIEW,
+    Permission.INVENTORY_ITEM_MANAGE,
+    Permission.INVENTORY_STOCK_ADJUST,
+
     // Payment Management
     Permission.PAYMENT_CREATE,
     Permission.PAYMENT_UPDATE,
@@ -292,6 +355,18 @@ export const RolePermissions: Record<UserRole, Permission[]> = {
     Permission.BOOKING_VIEW,
     Permission.BOOKING_LIST,
 
+    // Event Operations
+    Permission.OPERATIONS_VIEW,
+    Permission.OPERATIONS_TASK_UPDATE,
+
+    // Event Inventory
+    Permission.EVENT_INVENTORY_VIEW,
+    Permission.EVENT_INVENTORY_DISPATCH,
+    Permission.EVENT_INVENTORY_RETURN,
+
+    // Inventory Master
+    Permission.INVENTORY_ITEM_VIEW,
+
     // Payment Management (create and view)
     Permission.PAYMENT_CREATE,
     Permission.PAYMENT_VIEW,
@@ -330,6 +405,13 @@ export const RolePermissions: Record<UserRole, Permission[]> = {
     // Booking Management (view only)
     Permission.BOOKING_VIEW,
     Permission.BOOKING_LIST,
+
+    // Event Operations (view only)
+    Permission.OPERATIONS_VIEW,
+
+    // Event Inventory (view only)
+    Permission.EVENT_INVENTORY_VIEW,
+    Permission.INVENTORY_ITEM_VIEW,
 
     // Payment Management (view only)
     Permission.PAYMENT_VIEW,

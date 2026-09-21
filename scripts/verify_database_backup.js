@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const { backupDir: resolveBackupDir } = require('./backup_paths');
 
 function checksum(filePath) {
   return crypto
@@ -61,7 +62,7 @@ function verifyBackup(backupPath) {
 }
 
 function main() {
-  const backupDir = path.resolve(__dirname, '../../backups/database');
+  const backupDir = resolveBackupDir();
   const requestedPath = process.env.BACKUP_FILE
     ? path.resolve(process.env.BACKUP_FILE)
     : latestBackup(backupDir);

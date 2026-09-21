@@ -11,6 +11,28 @@ import { SlotService } from '../services/SlotService';
 import pool from '../config/db';
 
 const slotService = new SlotService();
+const DEFAULT_TENANT_SETTINGS: Record<string, string> = {
+  calendar_slot_mode: 'three_slots',
+};
+
+const ALLOWED_TENANT_SETTINGS: Record<string, Set<string> | null> = {
+  calendar_slot_mode: new Set(['three_slots', 'two_slots', 'full_day']),
+};
+
+const normalizeTenantSettings = (settings: Record<string, string>) => ({
+  ...DEFAULT_TENANT_SETTINGS,
+  ...settings,
+});
+
+const normalizeSlug = (value: string) =>
+  String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .replace(/-{2,}/g, '-');
+
+const isValidSlug = (value: string) => /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(value);
 
 export class TenantController {
   /**
@@ -27,7 +49,7 @@ export class TenantController {
 
       res.json({
         tenant,
-        settings,
+        settings: normalizeTenantSettings(settings),
       });
     } catch (error: any) {
       console.error('Get current tenant error:', error);
@@ -62,7 +84,7 @@ export class TenantController {
 
       res.json({
         tenant,
-        settings,
+        settings: normalizeTenantSettings(settings),
       });
     } catch (error: any) {
       console.error('Get tenant by ID error:', error);
@@ -106,7 +128,7 @@ export class TenantController {
     try {
       const tenantId = getTenantId();
       const settings = await TenantRepository.getSettings(tenantId);
-      res.json(settings);
+      res.json(normalizeTenantSettings(settings));
     } catch (error: any) {
       console.error('Get tenant settings error:', error);
       res.status(500).json({ error: error.message });
@@ -124,8 +146,21 @@ export class TenantController {
       if (!key) {
         return res.status(400).json({ error: 'Setting key is required' });
       }
+      const allowedValues = ALLOWED_TENANT_SETTINGS[key];
+      if (allowedValues === undefined) {
+        return res.status(400).json({
+          error: 'This tenant setting is not supported.',
+          supported_settings: Object.keys(ALLOWED_TENANT_SETTINGS),
+        });
+      }
+      if (allowedValues && !allowedValues.has(String(value))) {
+        return res.status(400).json({
+          error: 'Invalid calendar slot mode.',
+          allowed_values: Array.from(allowedValues),
+        });
+      }
 
-      await TenantRepository.setSetting(tenantId, key, value);
+      await TenantRepository.setSetting(tenantId, key, String(value));
       await AuditRepository.recordTenant({
         actorUserId: req.user?.id,
         action: 'tenant.setting_updated',
@@ -148,23 +183,24 @@ export class TenantController {
     try {
       const { name, slug, subdomain, domain, logo_url } = req.body;
       const tenantDomain = domain || subdomain;
+      const normalizedSlug = normalizeSlug(slug || name);
 
       // Validate required fields
-      if (!name || !slug) {
+      if (!name || !normalizedSlug) {
         return res.status(400).json({ 
           success: false,
           error: 'Name and slug are required' 
         });
       }
-      if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)) {
+      if (!isValidSlug(normalizedSlug)) {
         return res.status(400).json({
           success: false,
-          error: 'Slug must contain lowercase letters, numbers, and hyphens only',
+          error: 'Slug can only use lowercase letters, numbers, and single hyphens. Example: royal-palace-hall.',
         });
       }
 
       // Check if slug already exists
-      const existing = await TenantRepository.findBySlug(slug);
+      const existing = await TenantRepository.findBySlug(normalizedSlug);
       if (existing) {
         return res.status(409).json({ 
           success: false,
@@ -186,7 +222,7 @@ export class TenantController {
       // Create tenant
       const tenantId = await TenantRepository.create({
         name,
-        slug,
+        slug: normalizedSlug,
         subdomain: tenantDomain,
         logo_url,
       });
@@ -195,7 +231,7 @@ export class TenantController {
         action: 'tenant.created',
         targetType: 'tenant',
         targetId: String(tenantId),
-        metadata: { name, slug, domain: tenantDomain, logo_url },
+        metadata: { name, slug: normalizedSlug, domain: tenantDomain, logo_url },
         requestId: req.requestId,
         ipAddress: req.ip,
       });
@@ -222,6 +258,7 @@ export class TenantController {
       const tenantId = parseInt(req.params.id);
       const { name, slug, subdomain, domain, logo_url, status } = req.body;
       const tenantDomain = domain || subdomain;
+      const normalizedSlug = slug !== undefined ? normalizeSlug(slug || name || '') : undefined;
       const allowedStatuses = [
         'trial',
         'active',
@@ -237,10 +274,10 @@ export class TenantController {
           error: 'Invalid tenant status',
         });
       }
-      if (slug && !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)) {
+      if (slug !== undefined && (!normalizedSlug || !isValidSlug(normalizedSlug))) {
         return res.status(400).json({
           success: false,
-          error: 'Slug must contain lowercase letters, numbers, and hyphens only',
+          error: 'Slug can only use lowercase letters, numbers, and single hyphens. Example: royal-palace-hall.',
         });
       }
 
@@ -254,8 +291,8 @@ export class TenantController {
       }
 
       // Check if slug is being changed and already exists
-      if (slug && slug !== tenant.slug) {
-        const existing = await TenantRepository.findBySlug(slug);
+      if (normalizedSlug && normalizedSlug !== tenant.slug) {
+        const existing = await TenantRepository.findBySlug(normalizedSlug);
         if (existing) {
           return res.status(409).json({ 
             success: false,
@@ -277,7 +314,7 @@ export class TenantController {
 
       await TenantRepository.updateById(tenantId, {
         name,
-        slug,
+        slug: normalizedSlug,
         subdomain: tenantDomain,
         logo_url,
         status,
@@ -289,7 +326,7 @@ export class TenantController {
         targetId: String(tenantId),
         metadata: {
           previous: { name: tenant.name, slug: tenant.slug, status: tenant.status },
-          updated: { name, slug, domain: tenantDomain, logo_url, status },
+          updated: { name, slug: normalizedSlug, domain: tenantDomain, logo_url, status },
         },
         requestId: req.requestId,
         ipAddress: req.ip,

@@ -1,10 +1,11 @@
 const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
+const { backupDir: resolveBackupDir, backupHeartbeatPath } = require('./backup_paths');
 
-const backupDir = path.resolve(__dirname, '../../backups/database');
+const backupDir = resolveBackupDir();
 const lockPath = path.join(backupDir, '.scheduled-backup.lock');
-const heartbeatPath = path.join(backupDir, 'scheduler-heartbeat.json');
+const heartbeatPath = backupHeartbeatPath();
 const staleLockMs = 6 * 60 * 60 * 1000;
 
 function runScript(scriptName) {

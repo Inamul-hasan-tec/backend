@@ -6,6 +6,7 @@
 import { Request, Response, NextFunction } from 'express';
 import pool from '../config/db';
 import { UserRole } from '../types/permissions';
+import { runWithTenantContext } from '../utils/tenantContext';
 
 export interface TenantRequest extends Request {
   tenantId?: number;
@@ -88,7 +89,14 @@ export const tenantMiddleware = async (
       ...tenant,
       subdomain: tenant.subdomain || tenant.domain || null,
     };
-    next();
+    return runWithTenantContext(
+      {
+        tenantId,
+        userId: req.user.id,
+        role: req.user.role,
+      },
+      next
+    );
   } catch (error: any) {
     console.error('Tenant middleware error:', error);
     res.status(500).json({ error: 'Failed to identify tenant' });

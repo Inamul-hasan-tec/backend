@@ -79,6 +79,11 @@ router.get('/:id/pdf',
   InvoiceController.downloadInvoicePDF.bind(InvoiceController)
 );
 
+router.get('/:id/email-preview', 
+  requirePermission(Permission.INVOICE_VIEW),
+  InvoiceController.previewInvoiceEmail.bind(InvoiceController)
+);
+
 router.post('/:id/email', 
   requirePermission(Permission.INVOICE_GENERATE),
   InvoiceController.emailInvoice.bind(InvoiceController)

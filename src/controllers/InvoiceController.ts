@@ -10,6 +10,8 @@ import InvoicePDFService from '../services/InvoicePDFService';
 import InvoiceEmailService, {
   EmailConfigurationError,
 } from '../services/InvoiceEmailService';
+import AuditRepository from '../repositories/AuditRepository';
+import NotificationService from '../services/NotificationService';
 
 export class InvoiceController {
   /**
@@ -204,6 +206,9 @@ export class InvoiceController {
 
       const invoiceId = await InvoiceRepository.createInvoice(invoiceData, userId);
       const invoice = await InvoiceRepository.getInvoiceById(invoiceId);
+      if (invoice) {
+        NotificationService.invoiceCreated(req.user?.id, invoice);
+      }
 
       res.status(201).json({
         success: true,
@@ -320,17 +325,11 @@ export class InvoiceController {
   async cancelInvoice(req: Request, res: Response): Promise<void> {
     try {
       const { id } = req.params;
-      const { reason } = req.body;
+      const cancelReason = (typeof req.body?.reason === 'string' && req.body.reason.trim())
+        ? req.body.reason.trim()
+        : 'Cancelled by user';
 
-      if (!reason) {
-        res.status(400).json({
-          success: false,
-          message: 'Cancellation reason is required',
-        });
-        return;
-      }
-
-      const cancelled = await InvoiceRepository.cancel(parseInt(id), reason);
+      const cancelled = await InvoiceRepository.cancel(parseInt(id), cancelReason);
 
       if (!cancelled) {
         res.status(400).json({
@@ -364,6 +363,9 @@ export class InvoiceController {
   async recordPayment(req: Request, res: Response): Promise<void> {
     try {
       const paymentData: RecordPaymentDTO = req.body;
+      paymentData.received_by = req.user?.id || null;
+      paymentData.idempotency_key =
+        String(req.headers['idempotency-key'] || req.body.idempotency_key || '').trim() || null;
       if (!paymentData.allocations && req.body.invoice_id && req.body.amount) {
         paymentData.allocations = [
           {
@@ -381,6 +383,16 @@ export class InvoiceController {
         });
         return;
       }
+      if (
+        ['upi', 'bank_transfer', 'cheque', 'card'].includes(paymentData.payment_mode) &&
+        !paymentData.transaction_reference
+      ) {
+        res.status(400).json({
+          success: false,
+          message: 'Transaction reference is required for this payment mode',
+        });
+        return;
+      }
 
       // Validate total allocation matches payment amount
       const totalAllocated = paymentData.allocations.reduce((sum, a) => sum + a.amount, 0);
@@ -393,6 +405,28 @@ export class InvoiceController {
       }
 
       const paymentId = await InvoiceRepository.recordPayment(paymentData);
+      await AuditRepository.recordTenant({
+        actorUserId: req.user?.id,
+        action: 'payment.recorded_from_invoice',
+        entityType: 'payment',
+        entityId: paymentId,
+        newValues: {
+          amount: paymentData.amount,
+          payment_mode: paymentData.payment_mode,
+          payment_date: paymentData.payment_date,
+          allocations: paymentData.allocations,
+          idempotency_key: paymentData.idempotency_key ? '[PRESENT]' : null,
+        },
+        ipAddress: req.ip,
+      });
+      const invoiceId = paymentData.allocations[0]?.invoice_id;
+      if (invoiceId) {
+        NotificationService.invoicePaymentRecorded(req.user?.id, invoiceId, {
+          id: paymentId,
+          amount: paymentData.amount,
+          payment_mode: paymentData.payment_mode,
+        });
+      }
 
       res.status(201).json({
         success: true,
@@ -451,10 +485,11 @@ export class InvoiceController {
 
       const pdf = await InvoicePDFService.generate(invoice);
       const safeInvoiceNumber = invoice.invoice_number.replace(/[^a-zA-Z0-9_-]/g, '_');
+      const isInline = req.query.inline === 'true' || req.query.preview === 'true';
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader(
         'Content-Disposition',
-        `attachment; filename="${safeInvoiceNumber}.pdf"`
+        `${isInline ? 'inline' : 'attachment'}; filename="${safeInvoiceNumber}.pdf"`
       );
       res.setHeader('Content-Length', pdf.length.toString());
       res.send(pdf);
@@ -463,6 +498,40 @@ export class InvoiceController {
       res.status(500).json({
         success: false,
         message: 'Failed to generate PDF',
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
+  }
+
+  /**
+   * GET /api/invoices/:id/email-preview
+   * Get preview of the invoice email HTML and metadata without sending
+   */
+  async previewInvoiceEmail(req: Request, res: Response): Promise<void> {
+    try {
+      const { id } = req.params;
+      const invoice = await InvoiceRepository.getInvoiceById(parseInt(id));
+
+      if (!invoice) {
+        res.status(404).json({
+          success: false,
+          message: 'Invoice not found',
+        });
+        return;
+      }
+
+      const emailService = new InvoiceEmailService();
+      const preview = emailService.getInvoiceEmailPreview(invoice);
+
+      res.json({
+        success: true,
+        data: preview,
+      });
+    } catch (error) {
+      console.error('Error generating email preview:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to generate invoice email preview',
         error: error instanceof Error ? error.message : 'Unknown error',
       });
     }

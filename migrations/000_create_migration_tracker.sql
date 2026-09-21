@@ -7,13 +7,16 @@ CREATE TABLE IF NOT EXISTS migration_tracker (
   migration_name VARCHAR(255) NOT NULL UNIQUE,
   executed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   execution_time_ms INT DEFAULT 0,
-  status ENUM('success', 'failed', 'pending') DEFAULT 'pending',
+  status ENUM('success', 'failed', 'pending', 'completed') DEFAULT 'pending',
   notes TEXT,
   INDEX idx_migration_name (migration_name),
   INDEX idx_executed_at (executed_at),
   INDEX idx_status (status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
 COMMENT='Tracks database migration execution history';
+
+-- Update status ENUM if table already exists
+ALTER TABLE migration_tracker MODIFY COLUMN status ENUM('success', 'failed', 'pending', 'completed') DEFAULT 'pending';
 
 -- Migration complete
 SELECT 'Migration tracker table created successfully' AS status;

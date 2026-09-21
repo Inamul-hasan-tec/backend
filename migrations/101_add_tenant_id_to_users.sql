@@ -25,5 +25,15 @@ ALTER TABLE users
 MODIFY COLUMN role ENUM('super_admin', 'admin', 'staff_1', 'staff_2', 'viewer') 
 DEFAULT 'staff_2';
 
+-- Ensure packages table has tenant_id column
+SET @col_exists = (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'packages' AND COLUMN_NAME = 'tenant_id');
+SET @sql = IF(@col_exists = 0, 'ALTER TABLE packages ADD COLUMN tenant_id INT NOT NULL DEFAULT 1 AFTER id', 'SELECT "packages.tenant_id exists"');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+-- Ensure payments table has tenant_id column
+SET @col_exists = (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'payments' AND COLUMN_NAME = 'tenant_id');
+SET @sql = IF(@col_exists = 0, 'ALTER TABLE payments ADD COLUMN tenant_id INT NOT NULL DEFAULT 1 AFTER id', 'SELECT "payments.tenant_id exists"');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
 -- Migration complete
 SELECT 'Migration 101 completed: tenant_id added to users table' AS status;

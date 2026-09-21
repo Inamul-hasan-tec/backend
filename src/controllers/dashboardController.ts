@@ -21,11 +21,13 @@ export const getDashboardStats = asyncHandler(async (req: Request, res: Response
 
 /**
  * GET /api/dashboard/revenue-chart
- * Get monthly revenue chart data
+ * Get revenue chart data (weekly, monthly, yearly)
  */
 export const getRevenueChart = asyncHandler(async (req: Request, res: Response) => {
+  const period = (req.query.period as 'week' | 'month' | 'year') || 'month';
+  const timeframe = (req.query.timeframe as string) || '6_months';
   const months = req.query.months ? parseInt(req.query.months as string) : 6;
-  const data = await dashboardService.getMonthlyRevenueChart(months);
+  const data = await dashboardService.getRevenueChart({ period, timeframe, months });
   res.json(successResponse('Revenue chart data retrieved', data));
 });
 

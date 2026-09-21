@@ -36,4 +36,16 @@ export function testReminderQueriesAreTenantScoped() {
     /'full_day'\s+as\s+time_slot/i,
     'Reminder queries must return the actual booking slot, not a hardcoded slot'
   );
+
+  assert.match(
+    source,
+    /b\.status,\s*b\.total_amount/s,
+    'Manual reminder lookup must select booking status'
+  );
+
+  assert.match(
+    source,
+    /booking\.status\s*===\s*['"]cancelled['"]/,
+    'Manual payment reminders must be blocked for cancelled bookings'
+  );
 }

@@ -2,13 +2,26 @@
 -- These columns/tables are used by TenantRepository and platform tenant
 -- management, so the audit must catch them before runtime.
 
+SET @tenant_domain_exists := (
+  SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
+  WHERE table_schema = DATABASE() AND table_name = 'tenants' AND column_name = 'domain'
+);
+SET @sql := IF(
+  @tenant_domain_exists = 0,
+  'ALTER TABLE tenants ADD COLUMN domain VARCHAR(100) UNIQUE NULL AFTER slug',
+  'SELECT ''tenants.domain exists'' AS migration_note'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
 SET @tenant_logo_exists := (
   SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
   WHERE table_schema = DATABASE() AND table_name = 'tenants' AND column_name = 'logo_url'
 );
 SET @sql := IF(
   @tenant_logo_exists = 0,
-  'ALTER TABLE tenants ADD COLUMN logo_url VARCHAR(500) NULL AFTER domain',
+  'ALTER TABLE tenants ADD COLUMN logo_url VARCHAR(500) NULL AFTER name',
   'SELECT ''tenants.logo_url exists'' AS migration_note'
 );
 PREPARE stmt FROM @sql;

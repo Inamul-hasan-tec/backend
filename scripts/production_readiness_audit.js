@@ -3,6 +3,7 @@ const path = require('path');
 const mysql = require('mysql2/promise');
 const dotenv = require('dotenv');
 const { verifyBackup } = require('./verify_database_backup');
+const { backupDir: resolveBackupDir, backupHeartbeatPath } = require('./backup_paths');
 
 dotenv.config({ path: path.join(__dirname, '../.env') });
 
@@ -19,6 +20,9 @@ function bool(name) {
 }
 
 function resolveDbSSL() {
+  const dbHost = String(process.env.DB_HOST || '').trim().toLowerCase();
+  const localHosts = new Set(['127.0.0.1', 'localhost', '::1']);
+  const isLocalDatabase = localHosts.has(dbHost);
   const sslMode = process.env.DB_SSL_MODE || process.env['SSL Mode'] || '';
   const enabled =
     bool('DB_SSL') ||
@@ -31,6 +35,7 @@ function resolveDbSSL() {
 
   return {
     enabled,
+    isLocalDatabase,
     caPath,
     caExists: enabled ? fs.existsSync(path.resolve(process.cwd(), caPath)) : false,
   };
@@ -68,7 +73,13 @@ async function main() {
     isSet('CORS_ORIGIN') && !/localhost|127\.0\.0\.1/i.test(process.env.CORS_ORIGIN),
     process.env.CORS_ORIGIN || '<missing>'
   );
-  check(checks, 'blocker', 'Database SSL enabled', dbSSL.enabled, dbSSL.enabled ? 'enabled' : 'disabled');
+  check(
+    checks,
+    'blocker',
+    'Database transport is protected',
+    dbSSL.enabled || dbSSL.isLocalDatabase,
+    dbSSL.enabled ? 'ssl=enabled' : dbSSL.isLocalDatabase ? 'local loopback database; ssl not required' : 'remote database without ssl'
+  );
   check(checks, 'blocker', 'Database SSL CA file exists', !dbSSL.enabled || dbSSL.caExists, dbSSL.caPath);
   check(checks, 'warning', 'SMTP enabled', bool('SMTP_ENABLED'), process.env.SMTP_ENABLED || '<unset>');
   check(
@@ -160,6 +171,18 @@ async function main() {
          UNION ALL SELECT '312_tenant_schema_drift_guards.sql'
          UNION ALL SELECT '313_hall_scoped_packages.sql'
          UNION ALL SELECT '314_discount_template_tenant_scope.sql'
+         UNION ALL SELECT '315_payment_machine.sql'
+         UNION ALL SELECT '316_hall_gallery.sql'
+         UNION ALL SELECT '317_calendar_insights.sql'
+         UNION ALL SELECT '318_owner_activity_notifications.sql'
+         UNION ALL SELECT '319_tenant_calendar_slot_mode.sql'
+         UNION ALL SELECT '320_event_inventory_operations.sql'
+         UNION ALL SELECT '321_inventory_master_strengthening_guards.sql'
+         UNION ALL SELECT '322_employee_management.sql'
+         UNION ALL SELECT '323_operation_settings.sql'
+         UNION ALL SELECT '324_operation_readiness_flexibility.sql'
+         UNION ALL SELECT '325_slot_calendar_query_indexes.sql'
+         UNION ALL SELECT '326_rate_studio.sql'
        ) expected
        LEFT JOIN schema_migrations sm ON sm.migration_name = expected.migration_name
        WHERE sm.migration_name IS NULL`
@@ -182,8 +205,45 @@ async function main() {
     check(checks, 'blocker', 'At least two tenants exist for acceptance', Number(tenantRows[0].total) >= 2, `count=${tenantRows[0].total}`);
     check(checks, 'blocker', 'At least two accessible tenants exist', Number(tenantRows[0].accessible_count) >= 2, `count=${tenantRows[0].accessible_count || 0}`);
 
+    const calendarInsightTables = [
+      'calendar_days',
+      'calendar_events',
+      'hall_calendar_preferences',
+      'calendar_source_runs',
+    ];
+    for (const tableName of calendarInsightTables) {
+      const [tableRows] = await connection.query(
+        `SELECT COUNT(*) AS count
+         FROM information_schema.tables
+         WHERE table_schema = DATABASE()
+           AND table_name = ?`,
+        [tableName]
+      );
+      check(
+        checks,
+        'warn',
+        `Calendar insights table exists: ${tableName}`,
+        Number(tableRows[0].count) === 1,
+        `count=${tableRows[0].count}`
+      );
+    }
+
+    const [notificationTableRows] = await connection.query(
+      `SELECT COUNT(*) AS count
+       FROM information_schema.tables
+       WHERE table_schema = DATABASE()
+         AND table_name = 'notifications'`
+    );
+    check(
+      checks,
+      'warn',
+      'Owner activity notifications table exists',
+      Number(notificationTableRows[0].count) === 1,
+      `count=${notificationTableRows[0].count}`
+    );
+
     const [tenantAdminRows] = await connection.query(
-      `SELECT COUNT(DISTINCT tenant_id) AS tenant_count
+      `SELECT COUNT(DISTINCT ut.tenant_id) AS tenant_count
        FROM user_tenants ut
        INNER JOIN users u ON u.id = ut.user_id
        WHERE ut.role = 'admin'
@@ -208,7 +268,7 @@ async function main() {
        WHERE table_schema = DATABASE()
          AND table_type = 'BASE TABLE'`
     );
-    const backupDir = path.resolve(__dirname, '../../backups/database');
+    const backupDir = resolveBackupDir();
     const latestBackup = fs.existsSync(backupDir)
       ? fs.readdirSync(backupDir)
           .filter((name) => name.endsWith('.sql'))
@@ -259,7 +319,7 @@ async function main() {
       backupAgeHours <= 26,
       Number.isFinite(backupAgeHours) ? `${backupAgeHours.toFixed(1)} hours` : '<missing>'
     );
-    const heartbeatPath = path.join(backupDir, 'scheduler-heartbeat.json');
+    const heartbeatPath = backupHeartbeatPath();
     let heartbeat = null;
     try {
       heartbeat = JSON.parse(fs.readFileSync(heartbeatPath, 'utf8'));

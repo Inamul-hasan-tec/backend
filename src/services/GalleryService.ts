@@ -1,6 +1,18 @@
 import GalleryRepository, { CreateGalleryImageData, UpdateGalleryImageData } from '../repositories/GalleryRepository';
 import CloudinaryService from './CloudinaryService';
 import { getTenantId } from '../utils/tenantContext';
+import fs from 'fs/promises';
+import path from 'path';
+import crypto from 'crypto';
+import { logger } from '../utils/logger';
+
+const imageExtensionByMimeType: Record<string, string> = {
+  'image/jpeg': 'jpg',
+  'image/png': 'png',
+  'image/webp': 'webp',
+  'image/gif': 'gif',
+  'image/svg+xml': 'svg',
+};
 
 class GalleryService {
   // Get all images for a hall
@@ -29,19 +41,7 @@ class GalleryService {
     }
   ) {
     const tenantId = getTenantId();
-    // Upload to Cloudinary
-    const imageUrl = await CloudinaryService.uploadFromBuffer(
-      file,
-      `halls/${tenantId}/${hallId}`
-    );
-
-    // Generate thumbnail URL (using the same URL with transformation)
-    const thumbnailUrl = CloudinaryService.getOptimizedUrl(imageUrl, {
-      width: 400,
-      height: 300,
-      crop: 'fill',
-      quality: 'auto',
-    });
+    const storage = await this.storePublicHallImage(file, tenantId, hallId);
 
     // Get current max display order
     const existingImages = await GalleryRepository.getHallGallery(hallId);
@@ -52,9 +52,9 @@ class GalleryService {
     // Create database record
     const imageData: CreateGalleryImageData = {
       hall_id: hallId,
-      image_url: imageUrl,
-      thumbnail_url: thumbnailUrl,
-      public_id: imageUrl, // Using URL as public_id for now
+      image_url: storage.imageUrl,
+      thumbnail_url: storage.thumbnailUrl,
+      public_id: storage.publicId,
       category: metadata?.category || 'general',
       caption: metadata?.caption,
       alt_text: metadata?.alt_text,
@@ -64,6 +64,55 @@ class GalleryService {
     };
 
     return await GalleryRepository.createImage(imageData);
+  }
+
+  private async storePublicHallImage(
+    file: Express.Multer.File,
+    tenantId: number,
+    hallId: number
+  ): Promise<{ imageUrl: string; thumbnailUrl: string; publicId: string }> {
+    if (CloudinaryService.isConfigured()) {
+      const imageUrl = await CloudinaryService.uploadFromBuffer(
+        file,
+        `hallsync/tenant-${tenantId}/halls/${hallId}`
+      );
+      return {
+        imageUrl,
+        thumbnailUrl: CloudinaryService.getOptimizedUrl(imageUrl, {
+          width: 400,
+          height: 300,
+          crop: 'fill',
+          quality: 'auto',
+        }),
+        publicId: imageUrl,
+      };
+    }
+
+    const uploadRoot = process.env.LOCAL_UPLOAD_ROOT || path.join(process.cwd(), 'uploads');
+    const relativeFolder = path.join('hall-gallery', `tenant-${tenantId}`, `hall-${hallId}`);
+    const absoluteFolder = path.join(uploadRoot, relativeFolder);
+    await fs.mkdir(absoluteFolder, { recursive: true });
+
+    const extension = imageExtensionByMimeType[file.mimetype] || 'bin';
+    const fileName = `${Date.now()}-${crypto.randomBytes(8).toString('hex')}.${extension}`;
+    const absolutePath = path.join(absoluteFolder, fileName);
+    await fs.writeFile(absolutePath, file.buffer);
+
+    const relativeUrl = `/uploads/${relativeFolder.split(path.sep).join('/')}/${fileName}`;
+    const publicBaseUrl = (process.env.PUBLIC_API_BASE_URL || process.env.API_BASE_URL || '').replace(/\/$/, '');
+    const imageUrl = publicBaseUrl ? `${publicBaseUrl}${relativeUrl}` : relativeUrl;
+
+    logger.warn('hall_gallery_stored_locally_cloudinary_missing', {
+      tenant_id: tenantId,
+      hall_id: hallId,
+      mime_type: file.mimetype,
+    });
+
+    return {
+      imageUrl,
+      thumbnailUrl: imageUrl,
+      publicId: `local:${relativeUrl}`,
+    };
   }
 
   // Upload multiple images
@@ -93,8 +142,9 @@ class GalleryService {
       throw new Error('Image not found');
     }
 
-    // Delete from Cloudinary if public_id exists
-    if (image.public_id) {
+    // Delete from Cloudinary if public_id exists. Local fallback files are left
+    // on disk for safety; cleanup can be handled by an operator script later.
+    if (image.public_id && !String(image.public_id).startsWith('local:')) {
       try {
         await CloudinaryService.deleteImage(image.public_id);
       } catch (error) {

@@ -6,6 +6,16 @@ import { SlotService } from '../services/SlotService';
 const slotService = new SlotService();
 
 export class PlatformSubscriptionController {
+  async listSubscriptions(_req: Request, res: Response): Promise<void> {
+    try {
+      const subscriptions = await SubscriptionRepository.listPlatformSubscriptions();
+      res.json({ success: true, data: subscriptions });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to load subscriptions';
+      res.status(500).json({ success: false, error: message });
+    }
+  }
+
   async listPending(_req: Request, res: Response): Promise<void> {
     try {
       const payments = await SubscriptionRepository.listPendingPayments();
@@ -31,8 +41,11 @@ export class PlatformSubscriptionController {
         : null;
       res.json({
         success: true,
-        message: 'Subscription payment approved',
-        data: { slot_generation: slotGeneration },
+        message: 'Subscription payment approved and availability extended',
+        data: {
+          approval,
+          slot_generation: slotGeneration,
+        },
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Approval failed';

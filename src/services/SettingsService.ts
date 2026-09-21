@@ -59,7 +59,23 @@ interface AddTeamMemberData {
 interface SubmitPaymentData {
   transaction_id: string;
   user_id: number;
+  tenant_id?: number;
   payment_proof: Express.Multer.File;
+}
+
+interface UpdateOperationSettingsData {
+  operations_profile?: 'simple' | 'standard' | 'full' | 'custom';
+  enable_event_readiness?: boolean;
+  include_inventory_in_readiness?: boolean;
+  include_staff_in_readiness?: boolean;
+  include_payment_in_readiness?: boolean;
+  include_invoice_in_readiness?: boolean;
+  employee_mode?: 'off' | 'simple' | 'event_staffing' | 'advanced';
+  enable_employee_attendance?: boolean;
+  enable_employee_conflict_warnings?: boolean;
+  require_staff_for_event_closeout?: boolean;
+  enable_vendor_payout_tracking?: boolean;
+  enable_weekly_roster?: boolean;
 }
 
 export class SettingsService {
@@ -220,11 +236,46 @@ export class SettingsService {
   }
 
   // ============================================
+  // Operations Settings
+  // ============================================
+  async getOperationSettings() {
+    const tenantId = getTenantId();
+    return await this.settingsRepository.getOperationSettings(tenantId);
+  }
+
+  async updateOperationSettings(data: UpdateOperationSettingsData) {
+    const tenantId = getTenantId();
+    const allowedModes = ['off', 'simple', 'event_staffing', 'advanced'];
+    const allowedProfiles = ['simple', 'standard', 'full', 'custom'];
+    if (data.operations_profile && !allowedProfiles.includes(data.operations_profile)) {
+      throw new Error('Invalid operations profile');
+    }
+    if (data.employee_mode && !allowedModes.includes(data.employee_mode)) {
+      throw new Error('Invalid employee management mode');
+    }
+
+    return await this.settingsRepository.updateOperationSettings(tenantId, data);
+  }
+
+  // ============================================
   // Billing & Subscription
   // ============================================
+  async getSubscriptionPlans() {
+    const plans = await SubscriptionRepository.getPlans();
+    return plans.map((plan: any) => ({
+      ...plan,
+      monthly_price: Number(plan.monthly_price),
+      annual_price: Number(plan.annual_price),
+      features: typeof plan.features === 'string'
+        ? JSON.parse(plan.features || '[]')
+        : plan.features || [],
+    }));
+  }
+
   async getSubscription() {
     const tenantId = getTenantId();
     const subscription = await SubscriptionRepository.ensureTrialSubscription(tenantId);
+    const openOrders = await SubscriptionRepository.listTenantOpenOrders(tenantId);
 
     const now = new Date();
     const periodEnd = new Date(subscription?.current_period_end || now);
@@ -236,6 +287,34 @@ export class SettingsService {
       billingCycle: subscription.billing_cycle,
       nextBillingDate: subscription.current_period_end,
       daysRemaining,
+      openOrder: openOrders[0] || null,
+    };
+  }
+
+  async createSubscriptionOrder(userId: number, planCode: string, billingCycle: 'monthly' | 'annual') {
+    const tenantId = getTenantId();
+    const selectedPlan = await SubscriptionRepository.getPlan(planCode);
+    if (!selectedPlan) {
+      throw new Error('Selected subscription plan is unavailable');
+    }
+
+    const openOrder = await SubscriptionRepository.getLatestOpenOrder(tenantId);
+    if (openOrder?.status === 'payment_submitted') {
+      throw new Error('A subscription payment is already awaiting verification');
+    }
+
+    await SubscriptionRepository.cancelPendingOrders(tenantId);
+    const order = await SubscriptionRepository.createRenewalOrder(
+      tenantId,
+      userId,
+      planCode,
+      billingCycle
+    );
+
+    return {
+      ...order,
+      amount: Number(order.amount),
+      plan_name: selectedPlan.name,
     };
   }
 
@@ -285,6 +364,9 @@ export class SettingsService {
       upi_id: upiId,
       upiId,
       amount,
+      order_number: order.order_number,
+      plan_code: order.plan_code,
+      billing_cycle: order.billing_cycle,
       qr_code_url: qrCodeUrl,
       qrCodeUrl,
       upi_link: upiString
@@ -292,7 +374,7 @@ export class SettingsService {
   }
 
   async submitPayment(data: SubmitPaymentData) {
-    const tenantId = getTenantId();
+    const tenantId = data.tenant_id || getTenantId();
     let order = await SubscriptionRepository.getLatestOpenOrder(tenantId);
     if (order?.status === 'payment_submitted') {
       throw new Error('A subscription payment is already awaiting verification');
@@ -309,7 +391,7 @@ export class SettingsService {
       );
     }
 
-    const folder = this.cloudinaryService.getTenantFolder('payment-proofs');
+    const folder = `hallsync/tenant-${tenantId}/payment-proofs`;
     const { publicId: proofPublicId } = await this.cloudinaryService.uploadProof(
       data.payment_proof,
       folder
@@ -359,21 +441,32 @@ export class SettingsService {
         booking_cancelled: true,
         payment_received: true,
         payment_reminder: true,
+        invoice_created: true,
         daily_summary: true,
       },
-      sms: {
+      in_app: {
         booking_created: true,
         booking_updated: true,
         booking_cancelled: true,
         payment_received: true,
         payment_reminder: true,
+        invoice_created: true,
+      },
+      sms: {
+        booking_created: false,
+        booking_updated: false,
+        booking_cancelled: false,
+        payment_received: false,
+        payment_reminder: false,
+        invoice_created: false,
       },
       whatsapp: {
-        booking_created: true,
-        booking_updated: true,
-        booking_cancelled: true,
-        payment_received: true,
-        payment_reminder: true,
+        booking_created: false,
+        booking_updated: false,
+        booking_cancelled: false,
+        payment_received: false,
+        payment_reminder: false,
+        invoice_created: false,
       }
     };
 
@@ -391,7 +484,7 @@ export class SettingsService {
     const updates: any[] = [];
 
     // Flatten preferences object
-    for (const channel of ['email', 'sms', 'whatsapp']) {
+    for (const channel of ['in_app', 'email', 'sms', 'whatsapp']) {
       if (preferences[channel]) {
         for (const [eventType, enabled] of Object.entries(preferences[channel])) {
           updates.push({
@@ -413,19 +506,20 @@ export class SettingsService {
 
   private async createDefaultNotificationPreferences(userId: number) {
     const tenantId = getTenantId();
-    const channels = ['email', 'sms', 'whatsapp'];
+    const channels = ['in_app', 'email', 'sms', 'whatsapp'];
     const events = [
       'booking_created',
       'booking_updated',
       'booking_cancelled',
       'payment_received',
       'payment_reminder',
+      'invoice_created',
       'daily_summary'
     ];
 
     for (const channel of channels) {
       for (const event of events) {
-        // Skip daily_summary for sms and whatsapp
+        // Daily summaries are email-only for now.
         if (event === 'daily_summary' && channel !== 'email') continue;
 
         await this.settingsRepository.createNotificationPreference({
@@ -433,7 +527,7 @@ export class SettingsService {
           tenant_id: tenantId,
           channel,
           event_type: event,
-          enabled: true
+          enabled: channel === 'email' || channel === 'in_app'
         });
       }
     }

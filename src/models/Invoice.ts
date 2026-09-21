@@ -6,6 +6,8 @@
 export type InvoiceType = 'tax_invoice' | 'receipt_voucher' | 'credit_note' | 'debit_note';
 export type InvoiceStatus = 'draft' | 'issued' | 'sent' | 'paid' | 'partially_paid' | 'overdue' | 'cancelled' | 'void';
 export type SupplyType = 'intrastate' | 'interstate';
+export type TaxMode = 'inclusive' | 'exclusive' | 'exempt' | 'no_gst';
+export type TaxTreatment = 'taxable' | 'exempt' | 'nil_rated' | 'non_gst';
 
 export interface Invoice {
   id: number;
@@ -38,10 +40,15 @@ export interface Invoice {
   business_pincode: string;
   business_phone: string;
   business_email: string;
+  business_logo_url?: string | null;
   
   // Supply details
   supply_type: SupplyType;
   place_of_supply: string;
+  place_of_supply_state_code?: string | null;
+  place_of_supply_reason?: string | null;
+  financial_year?: string | null;
+  tax_mode: TaxMode;
   
   // Amounts
   subtotal: number;
@@ -92,6 +99,7 @@ export interface InvoiceLineItem {
   discount_percentage: number;
   discount_amount: number;
   taxable_value: number;
+  tax_treatment?: TaxTreatment;
   cgst_rate: number;
   sgst_rate: number;
   igst_rate: number;
@@ -112,6 +120,10 @@ export interface CreateInvoiceDTO {
   due_date?: Date | null;
   booking_id?: number | null;
   customer_id: number;
+  tax_mode?: TaxMode;
+  place_of_supply_state_code?: string | null;
+  place_of_supply_reason?: string | null;
+  financial_year?: string | null;
   
   // Line items
   line_items: CreateInvoiceLineItemDTO[];
@@ -132,6 +144,7 @@ export interface CreateInvoiceLineItemDTO {
   unit: string;
   unit_price: number;
   discount_percentage?: number;
+  tax_treatment?: TaxTreatment;
   gst_rate: number;
   cess_rate?: number;
   service_id?: number | null;
@@ -180,10 +193,12 @@ export interface PaymentAllocation {
 }
 
 export interface RecordPaymentDTO {
-  payment_date: Date;
+  payment_date: Date | string;
   amount: number;
   payment_mode: 'cash' | 'card' | 'upi' | 'bank_transfer' | 'cheque';
   transaction_reference: string | null;
   notes: string | null;
   allocations: PaymentAllocation[];
+  received_by?: number | null;
+  idempotency_key?: string | null;
 }

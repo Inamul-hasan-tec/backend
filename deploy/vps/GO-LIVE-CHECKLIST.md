@@ -43,7 +43,7 @@ npm run build
 - [ ] `hallsync-backup.timer` is enabled and scheduled.
 - [ ] Nginx config passes `nginx -t`.
 - [ ] Certbot certificate issued successfully.
-- [ ] `https://app.hallsync.in` opens the frontend.
+- [ ] `https://hallsync.in` opens the frontend.
 - [ ] `https://api.hallsync.in/api/health` returns success.
 
 ## E. Production safety checks

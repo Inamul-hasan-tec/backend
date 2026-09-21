@@ -7,12 +7,31 @@ import { RowDataPacket, ResultSetHeader } from 'mysql2';
 import { TenantBaseRepository } from './TenantBaseRepository';
 import { Booking, BookingDetails, BookingSearchParams } from '../models/Booking';
 import pool, { getConnection } from '../config/db';
-import { validateLimit } from '../utils/validators';
+import { validateLimit, validateOffset } from '../utils/validators';
 import { getTenantId } from '../utils/tenantContext';
+import {
+  generatePaymentReceiptNumber,
+  insertBookingPayment,
+  roundMoney,
+} from './PaymentLedgerRepository';
 
 export class BookingRepository extends TenantBaseRepository<Booking> {
   constructor() {
     super('bookings');
+  }
+
+  async findIdByIdempotencyKey(idempotencyKey: string): Promise<number | null> {
+    const tenantId = getTenantId();
+    const [rows] = await pool.execute<RowDataPacket[]>(
+      `SELECT id
+       FROM bookings
+       WHERE tenant_id = ?
+         AND JSON_UNQUOTE(JSON_EXTRACT(pricing_snapshot, '$.idempotency_key')) = ?
+       ORDER BY id DESC
+       LIMIT 1`,
+      [tenantId, idempotencyKey]
+    );
+    return rows[0]?.id ? Number(rows[0].id) : null;
   }
 
   /**
@@ -81,10 +100,18 @@ export class BookingRepository extends TenantBaseRepository<Booking> {
           const [insertResult] = await connection.execute<ResultSetHeader>(
             `INSERT INTO slots
              (tenant_id, hall_id, slot_date, slot_type, status, booking_id)
-             VALUES (?, ?, ?, ?, 'booked', ?)`,
+             VALUES (?, ?, ?, ?, 'booked', ?)
+             ON DUPLICATE KEY UPDATE status = 'booked', booking_id = VALUES(booking_id)`,
             [tenantId, target.hallId, target.eventDate, target.timeSlot, id]
           );
           targetSlotId = insertResult.insertId;
+          if (!targetSlotId) {
+            const [existingSlotRows] = await connection.execute<RowDataPacket[]>(
+              `SELECT id FROM slots WHERE tenant_id = ? AND hall_id = ? AND slot_date = ? AND slot_type = ?`,
+              [tenantId, target.hallId, target.eventDate, target.timeSlot]
+            );
+            targetSlotId = Number(existingSlotRows[0]?.id || 0);
+          }
         }
 
         await connection.execute(
@@ -103,11 +130,15 @@ export class BookingRepository extends TenantBaseRepository<Booking> {
         'time_slot',
         'event_type',
         'guest_count',
+        'hall_rate_amount',
+        'package_amount',
+        'pricing_snapshot',
         'total_amount',
         'advance_amount',
         'balance_amount',
         'payment_mode',
         'notes',
+        'status',
       ];
       const safeUpdates = Object.entries(updates).filter(
         ([field, value]) => allowedFields.includes(field) && value !== undefined
@@ -121,6 +152,15 @@ export class BookingRepository extends TenantBaseRepository<Booking> {
            SET ${setClause}, updated_at = NOW()
            WHERE id = ? AND tenant_id = ?`,
           [...values, id, tenantId]
+        );
+      }
+
+      if (updates.status === 'cancelled') {
+        await connection.execute(
+          `UPDATE slots
+           SET status = 'available', booking_id = NULL
+           WHERE tenant_id = ? AND booking_id = ?`,
+          [tenantId, id]
         );
       }
 
@@ -153,7 +193,7 @@ export class BookingRepository extends TenantBaseRepository<Booking> {
       await connection.beginTransaction();
 
       // Clean up frontend-specific fields before DB insert
-      const { slot_id, ...cleanBookingData } = bookingData as any;
+      const { slot_id, idempotency_key, ...cleanBookingData } = bookingData as any;
 
       // Create booking
       const dataWithTenant = { ...cleanBookingData, tenant_id: tenantId };
@@ -199,6 +239,26 @@ export class BookingRepository extends TenantBaseRepository<Booking> {
         );
       }
 
+      const advanceAmount = roundMoney(Number(bookingData.advance_amount || 0));
+      if (advanceAmount > 0) {
+        const totalAmount = roundMoney(Number(bookingData.total_amount || 0));
+        const receiptNumber = await generatePaymentReceiptNumber(connection, tenantId);
+        await insertBookingPayment(connection, {
+          tenantId,
+          bookingId,
+          amount: advanceAmount,
+          paymentMode: String(bookingData.payment_mode || 'cash'),
+          paymentType: advanceAmount >= totalAmount ? 'full' : 'advance',
+          transactionId: null,
+          paymentDate: new Date(),
+          notes: 'Initial payment recorded during booking creation',
+          receivedBy: Number(bookingData.created_by || 0) || null,
+          status: 'recorded',
+          idempotencyKey: `booking:${bookingId}:initial-payment`,
+          receiptNumber,
+        });
+      }
+
       await connection.commit();
       return bookingId;
     } catch (error) {
@@ -225,6 +285,7 @@ export class BookingRepository extends TenantBaseRepository<Booking> {
     const sql = `
       SELECT 
         b.*,
+        DATE_FORMAT(b.event_date, '%Y-%m-%d') as event_date,
         c.name as customer_name,
         c.phone as customer_phone,
         c.email as customer_email,
@@ -253,6 +314,7 @@ export class BookingRepository extends TenantBaseRepository<Booking> {
     let sql = `
       SELECT 
         b.*,
+        DATE_FORMAT(b.event_date, '%Y-%m-%d') as event_date,
         c.name as customer_name,
         c.phone as customer_phone,
         c.email as customer_email,
@@ -299,13 +361,13 @@ export class BookingRepository extends TenantBaseRepository<Booking> {
     sql += ' ORDER BY b.event_date DESC, b.created_at DESC';
 
     if (params.limit) {
-      sql += ' LIMIT ?';
-      values.push(params.limit);
+      const validLimit = validateLimit(params.limit, 50, 100);
+      sql += ` LIMIT ${validLimit}`;
     }
 
     if (params.offset) {
-      sql += ' OFFSET ?';
-      values.push(params.offset);
+      const validOffset = validateOffset(params.offset, 0, 10000);
+      sql += ` OFFSET ${validOffset}`;
     }
 
     const [rows] = await pool.execute<RowDataPacket[]>(sql, values);
@@ -322,6 +384,7 @@ export class BookingRepository extends TenantBaseRepository<Booking> {
     const sql = `
       SELECT 
         b.*,
+        DATE_FORMAT(b.event_date, '%Y-%m-%d') as event_date,
         c.name as customer_name,
         c.phone as customer_phone,
         c.email as customer_email,
@@ -347,6 +410,7 @@ export class BookingRepository extends TenantBaseRepository<Booking> {
     const sql = `
       SELECT 
         b.*,
+        DATE_FORMAT(b.event_date, '%Y-%m-%d') as event_date,
         c.name as customer_name,
         c.phone as customer_phone,
         h.name as hall_name
@@ -361,9 +425,9 @@ export class BookingRepository extends TenantBaseRepository<Booking> {
   }
 
   /**
-   * Cancel booking and release slot
+   * Cancel booking and release slot with audit trail and invoice handling
    */
-  async cancel(id: number): Promise<boolean> {
+  async cancel(id: number, reason?: string, cancelledBy?: number): Promise<boolean> {
     const tenantId = getTenantId();
     const connection = await getConnection();
     
@@ -371,16 +435,29 @@ export class BookingRepository extends TenantBaseRepository<Booking> {
       await connection.beginTransaction();
 
       // Check if booking belongs to tenant
-      const checkSql = `SELECT id FROM bookings WHERE id = ? AND tenant_id = ?`;
+      const checkSql = `SELECT id, status, total_amount, advance_amount, balance_amount, notes FROM bookings WHERE id = ? AND tenant_id = ? FOR UPDATE`;
       const [checkRows] = await connection.execute<RowDataPacket[]>(checkSql, [id, tenantId]);
       
       if (checkRows.length === 0) {
         throw new Error('Booking not found or unauthorized');
       }
 
+      if (checkRows[0].status === 'cancelled') {
+        await connection.commit();
+        return true;
+      }
+
+      const cancellationNote = reason?.trim() ? ` [Cancelled: ${reason.trim()}]` : ' [Cancelled]';
+
       // Update booking status
-      const bookingSql = `UPDATE bookings SET status = 'cancelled' WHERE id = ? AND tenant_id = ?`;
-      await connection.execute(bookingSql, [id, tenantId]);
+      const bookingSql = `
+        UPDATE bookings 
+        SET status = 'cancelled', 
+            notes = CONCAT(IFNULL(notes, ''), ?),
+            updated_at = NOW() 
+        WHERE id = ? AND tenant_id = ?
+      `;
+      await connection.execute(bookingSql, [cancellationNote, id, tenantId]);
 
       // Release slot
       const slotSql = `
@@ -389,6 +466,38 @@ export class BookingRepository extends TenantBaseRepository<Booking> {
         WHERE booking_id = ? AND tenant_id = ?
       `;
       await connection.execute(slotSql, [id, tenantId]);
+
+      // If active official invoices exist, mark them cancelled with reason
+      const invoiceCancelSql = `
+        UPDATE invoices 
+        SET status = 'cancelled', 
+            cancellation_reason = ?, 
+            cancelled_at = NOW(),
+            updated_at = NOW()
+        WHERE booking_id = ? AND tenant_id = ? AND status NOT IN ('cancelled', 'void')
+      `;
+      await connection.execute(invoiceCancelSql, [
+        `Booking BK-${String(id).padStart(6, '0')} cancelled${reason ? `: ${reason}` : ''}`,
+        id,
+        tenantId,
+      ]);
+
+      // Audit Log
+      await connection.query(
+        `INSERT INTO audit_logs
+         (tenant_id, user_id, action, entity_type, entity_id, new_values)
+         VALUES (?, ?, 'booking.cancelled', 'booking', ?, ?)`,
+        [
+          tenantId,
+          cancelledBy || null,
+          id,
+          JSON.stringify({
+            reason: reason || null,
+            total_amount: checkRows[0].total_amount,
+            advance_amount: checkRows[0].advance_amount,
+          }),
+        ]
+      );
 
       await connection.commit();
       return true;
@@ -434,7 +543,19 @@ export class BookingRepository extends TenantBaseRepository<Booking> {
 
 function formatDatabaseDate(value: string | Date): string {
   if (typeof value === 'string') {
+    if (value.includes('T')) {
+      const parsed = new Date(value);
+      if (!Number.isNaN(parsed.getTime())) {
+        const year = parsed.getFullYear();
+        const month = String(parsed.getMonth() + 1).padStart(2, '0');
+        const day = String(parsed.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+      }
+    }
     return value.slice(0, 10);
   }
-  return value.toISOString().slice(0, 10);
+  const year = value.getFullYear();
+  const month = String(value.getMonth() + 1).padStart(2, '0');
+  const day = String(value.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 }

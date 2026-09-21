@@ -101,24 +101,92 @@ export class DashboardService {
   }
 
   /**
-   * Get monthly revenue chart data
+   * Get revenue chart data with flexible granularity (week, month, year) and timeframe
    */
-  async getMonthlyRevenueChart(months: number = 6) {
+  async getRevenueChart(options: { period?: 'week' | 'month' | 'year'; timeframe?: string; months?: number } = {}) {
     const tenantId = getTenantId();
+    const period = options.period || 'month';
+    const months = options.months || (options.timeframe === '12_months' ? 12 : 6);
+
+    if (period === 'week') {
+      const weeks = options.timeframe === '8_weeks' ? 8 : 12;
+      const sql = `
+        SELECT 
+          CONCAT('W', WEEK(event_date, 1), ' (', DATE_FORMAT(MIN(event_date), '%b %d'), ')') as period_label,
+          DATE_FORMAT(event_date, '%X-W%V') as period_key,
+          COALESCE(SUM(total_amount), 0) as total_revenue,
+          COALESCE(SUM(advance_amount), 0) as advance_collected,
+          COALESCE(SUM(total_amount - advance_amount), 0) as balance_pending,
+          COUNT(*) as booking_count
+        FROM bookings
+        WHERE event_date >= DATE_SUB(CURDATE(), INTERVAL ? WEEK)
+        AND status IN ('confirmed', 'completed')
+        AND tenant_id = ?
+        GROUP BY period_key
+        ORDER BY period_key ASC
+      `;
+      const [rows] = await pool.execute<RowDataPacket[]>(sql, [weeks, tenantId]);
+      return rows.map((r) => ({
+        label: r.period_label || r.period_key,
+        month: r.period_label || r.period_key,
+        revenue: Number(r.total_revenue || 0),
+        advance: Number(r.advance_collected || 0),
+        balance: Number(r.balance_pending || 0),
+        bookings: Number(r.booking_count || 0),
+      }));
+    }
+
+    if (period === 'year') {
+      const sql = `
+        SELECT 
+          DATE_FORMAT(event_date, '%Y') as period_label,
+          DATE_FORMAT(event_date, '%Y') as period_key,
+          COALESCE(SUM(total_amount), 0) as total_revenue,
+          COALESCE(SUM(advance_amount), 0) as advance_collected,
+          COALESCE(SUM(total_amount - advance_amount), 0) as balance_pending,
+          COUNT(*) as booking_count
+        FROM bookings
+        WHERE status IN ('confirmed', 'completed')
+        AND tenant_id = ?
+        GROUP BY period_key
+        ORDER BY period_key ASC
+      `;
+      const [rows] = await pool.execute<RowDataPacket[]>(sql, [tenantId]);
+      return rows.map((r) => ({
+        label: r.period_label,
+        month: r.period_label,
+        revenue: Number(r.total_revenue || 0),
+        advance: Number(r.advance_collected || 0),
+        balance: Number(r.balance_pending || 0),
+        bookings: Number(r.booking_count || 0),
+      }));
+    }
+
+    // Default: month
     const sql = `
       SELECT 
-        DATE_FORMAT(created_at, '%Y-%m') as month,
-        COALESCE(SUM(total_amount), 0) as revenue,
-        COUNT(*) as bookings
+        DATE_FORMAT(event_date, '%b %Y') as period_label,
+        DATE_FORMAT(event_date, '%Y-%m') as period_key,
+        COALESCE(SUM(total_amount), 0) as total_revenue,
+        COALESCE(SUM(advance_amount), 0) as advance_collected,
+        COALESCE(SUM(total_amount - advance_amount), 0) as balance_pending,
+        COUNT(*) as booking_count
       FROM bookings
-      WHERE created_at >= DATE_SUB(CURDATE(), INTERVAL ? MONTH)
+      WHERE event_date >= DATE_SUB(CURDATE(), INTERVAL ? MONTH)
       AND status IN ('confirmed', 'completed')
       AND tenant_id = ?
-      GROUP BY DATE_FORMAT(created_at, '%Y-%m')
-      ORDER BY month ASC
+      GROUP BY period_key, period_label
+      ORDER BY period_key ASC
     `;
     const [rows] = await pool.execute<RowDataPacket[]>(sql, [months, tenantId]);
-    return rows;
+    return rows.map((r) => ({
+      label: r.period_label || r.period_key,
+      month: r.period_label || r.period_key,
+      revenue: Number(r.total_revenue || 0),
+      advance: Number(r.advance_collected || 0),
+      balance: Number(r.balance_pending || 0),
+      bookings: Number(r.booking_count || 0),
+    }));
   }
 
   /**
@@ -155,7 +223,7 @@ export class DashboardService {
         COUNT(b.id) as booking_count,
         COALESCE(SUM(b.total_amount), 0) as total_revenue
       FROM halls h
-      LEFT JOIN bookings b ON h.id = b.hall_id AND b.tenant_id = ?
+      LEFT JOIN bookings b ON h.id = b.hall_id AND b.tenant_id = ? AND b.status IN ('confirmed', 'completed')
       WHERE h.status = 'active' AND h.tenant_id = ?
       GROUP BY h.id, h.name, h.capacity, h.location
       ORDER BY booking_count DESC

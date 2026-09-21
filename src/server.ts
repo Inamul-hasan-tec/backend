@@ -12,11 +12,13 @@ import routes from './routes';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler';
 import { requestLogger } from './middleware/logger';
 import { installStructuredConsoleBridge, logger } from './utils/logger';
-import { captureError, isEnabled as isMonitoringEnabled } from './utils/errorMonitor';
+import { captureError, initErrorMonitor, isEnabled as isMonitoringEnabled } from './utils/errorMonitor';
+import { productionIntegrationsReadiness } from './utils/integrationReadiness';
 
 // Load environment variables
 dotenv.config();
 installStructuredConsoleBridge();
+initErrorMonitor();
 
 // Create Express app
 const app: Application = express();
@@ -141,10 +143,17 @@ async function startServer() {
 
     // Start Express server
     app.listen(PORT, () => {
+      const integrations = productionIntegrationsReadiness();
       logger.info('server_started', {
         port: Number(PORT),
         api_prefix: API_PREFIX,
         health_path: `${API_PREFIX}/health`,
+        integrations: {
+          smtp: integrations.smtp.status,
+          cloudinary: integrations.cloudinary.status,
+          error_monitoring: integrations.error_monitoring.status,
+          uptime_monitoring: integrations.uptime_monitoring.status,
+        },
       });
       if (isMonitoringEnabled()) {
         logger.info('error_monitoring_enabled', { dsn_configured: true });

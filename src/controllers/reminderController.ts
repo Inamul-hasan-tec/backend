@@ -34,11 +34,14 @@ export const sendPaymentReminder = asyncHandler(async (req: Request, res: Respon
     return;
   }
 
-  await reminderService.sendPaymentReminder(bookingId);
+  const result = await reminderService.sendPaymentReminder(bookingId);
 
-  res.json({
+  res.status(result.email_sent ? 200 : 202).json({
     success: true,
-    message: 'Payment reminder sent successfully'
+    message: result.email_sent
+      ? 'Payment reminder email sent successfully'
+      : 'Email reminder could not be sent. Use WhatsApp/manual reminder while SMTP is fixed.',
+    data: result,
   });
 });
 
@@ -85,5 +88,29 @@ export const sendBulkReminders = asyncHandler(async (req: Request, res: Response
     success: true,
     message: `Sent ${result.sent} reminders successfully`,
     data: result
+  });
+});
+
+/**
+ * GET /api/reminders/preview/:bookingId
+ * Get reminder preview (Email HTML & WhatsApp text) for a specific booking
+ */
+export const getReminderPreview = asyncHandler(async (req: Request, res: Response) => {
+  const { bookingId } = req.params;
+  const id = parseInt(bookingId);
+
+  if (isNaN(id)) {
+    res.status(400).json({
+      success: false,
+      message: 'Invalid booking ID',
+    });
+    return;
+  }
+
+  const preview = await reminderService.getReminderPreview(id);
+
+  res.json({
+    success: true,
+    data: preview,
   });
 });

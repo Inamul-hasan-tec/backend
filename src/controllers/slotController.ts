@@ -115,8 +115,8 @@ export const updateSlot = async (req: Request, res: Response): Promise<void> => 
 
 /**
  * POST /api/slots/generate
- * Generate slots for a month or all halls
- * Body: { year, month, hall_id } or { months }
+ * Ensure slots exist through the tenant subscription end.
+ * Body: { year, month, hall_id } or { months } for all active halls
  */
 export const generateSlots = async (req: Request, res: Response): Promise<void> => {
   try {
@@ -133,11 +133,13 @@ export const generateSlots = async (req: Request, res: Response): Promise<void> 
         return;
       }
 
-      const result = await slotService.generateSlotsForAllHalls(monthsNum);
+      const result = await slotService.generateCurrentTenantSlotsUntilSubscriptionEnd();
 
       res.json({
         success: true,
-        message: `Generated slots for ${result.hallsProcessed} halls`,
+        message: result.skipped
+          ? 'Slot generation skipped'
+          : `Generated slots for ${result.hallsProcessed} halls through subscription end`,
         data: result
       });
       return;
@@ -164,12 +166,18 @@ export const generateSlots = async (req: Request, res: Response): Promise<void> 
       return;
     }
 
-    const slotsCreated = await slotService.generateSlotsForMonth(yearNum, monthNum, hallIdNum);
+    const result = await slotService.generateCurrentTenantHallSlotsFromMonthUntilSubscriptionEnd(
+      yearNum,
+      monthNum,
+      hallIdNum
+    );
 
     res.json({
       success: true,
-      message: `Generated ${slotsCreated} slots`,
-      data: { slotsCreated }
+      message: result.skipped
+        ? 'Slot generation skipped'
+        : `Generated ${result.slotsCreated} slots through subscription end`,
+      data: result
     });
   } catch (error) {
     console.error('Error in generateSlots:', error);
@@ -269,6 +277,29 @@ export const blockSlot = async (req: Request, res: Response): Promise<void> => {
       success: false,
       message: 'Failed to block/unblock slot',
       error: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+};
+
+/**
+ * GET /api/slots/health
+ * Get availability health breakdown for active halls and subscription period
+ */
+export const getAvailabilityHealth = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const tenantId = req.user?.tenant_id || 1;
+    const health = await slotService.getAvailabilityHealth(tenantId);
+    res.json({
+      success: true,
+      message: 'Availability health retrieved successfully',
+      data: health,
+    });
+  } catch (error) {
+    console.error('Error in getAvailabilityHealth:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to retrieve availability health',
+      error: error instanceof Error ? error.message : 'Unknown error',
     });
   }
 };

@@ -21,6 +21,18 @@ const expectedMigrations = [
   '312_tenant_schema_drift_guards.sql',
   '313_hall_scoped_packages.sql',
   '314_discount_template_tenant_scope.sql',
+  '315_payment_machine.sql',
+  '316_hall_gallery.sql',
+  '317_calendar_insights.sql',
+  '318_owner_activity_notifications.sql',
+  '319_tenant_calendar_slot_mode.sql',
+  '320_event_inventory_operations.sql',
+  '321_inventory_master_strengthening_guards.sql',
+  '322_employee_management.sql',
+  '323_operation_settings.sql',
+  '324_operation_readiness_flexibility.sql',
+  '325_slot_calendar_query_indexes.sql',
+  '326_rate_studio.sql',
 ];
 
 const productionTarget = process.env.HALL_SYNC_PRODUCTION_TARGET === 'true';
@@ -45,13 +57,21 @@ const requiredTables = [
   'tenant_settings',
   'invoice_line_items',
   'invoice_payment_allocations',
+  'hall_gallery',
+  'calendar_days',
+  'calendar_events',
+  'hall_calendar_preferences',
+  'calendar_source_runs',
+  'notifications',
+  'hall_slot_prices',
+  'hall_rate_rules',
 ];
 
 const requiredColumns = {
   users: ['auth_version', 'phone'],
   tenants: ['domain', 'logo_url', 'status'],
   packages: ['hall_id'],
-  bookings: ['balance_amount', 'payment_mode'],
+  bookings: ['balance_amount', 'payment_mode', 'hall_rate_amount', 'package_amount', 'pricing_snapshot'],
   business_config: [
     'state_code',
     'website',
@@ -129,6 +149,19 @@ const requiredColumns = {
     'invoice_id',
     'payment_id',
     'amount',
+  ],
+  notifications: [
+    'tenant_id',
+    'user_id',
+    'actor_user_id',
+    'type',
+    'title',
+    'message',
+    'entity_type',
+    'entity_id',
+    'priority',
+    'metadata',
+    'read_at',
   ],
 };
 
