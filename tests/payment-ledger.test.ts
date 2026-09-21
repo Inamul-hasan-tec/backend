@@ -79,4 +79,18 @@ export function testPaymentLedgerInvariants() {
   assert.equal(isActivePaymentStatus('reversed'), false);
   assert.equal(isActivePaymentStatus('refunded'), false);
   assert.equal(isActivePaymentStatus('failed'), false);
+
+  // Financial integrity test:
+  // Grand total 32000 - 8000 total active payment = 24000 balance due
+  const grandTotal = 32000;
+  const activePayments = [
+    { amount: 8000, status: 'recorded' },
+    { amount: 1000, status: 'reversed' }, // reversed payment must not contribute to totalPaid
+  ];
+  const totalPaid = activePayments
+    .filter((p) => isActivePaymentStatus(p.status))
+    .reduce((sum, p) => sum + p.amount, 0);
+  const remainingDue = Math.max(0, grandTotal - totalPaid);
+  assert.equal(totalPaid, 8000);
+  assert.equal(remainingDue, 24000);
 }

@@ -32,6 +32,11 @@ router.get('/stats',
   customerController.getCustomerStats
 );
 
+router.get('/:id/dependencies',
+  requirePermission(Permission.CUSTOMER_VIEW),
+  customerController.getCustomerDependencies
+);
+
 router.get('/:id', 
   requirePermission(Permission.CUSTOMER_VIEW),
   customerController.getCustomerById
@@ -41,6 +46,11 @@ router.get('/:id',
 router.post('/', 
   requirePermission(Permission.CUSTOMER_CREATE),
   customerController.createCustomer
+);
+
+router.post('/:id/archive',
+  requirePermission(Permission.CUSTOMER_DELETE),
+  customerController.archiveCustomer
 );
 
 // PUT routes - Require UPDATE permission

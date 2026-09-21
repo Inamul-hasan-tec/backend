@@ -100,6 +100,18 @@ router.post(
   InvitationController.resend.bind(InvitationController)
 );
 
+router.delete(
+  '/team/invitations/:id',
+  requirePermission(Permission.USER_CREATE),
+  InvitationController.revoke.bind(InvitationController)
+);
+
+router.post(
+  '/team/invitations/:id/revoke',
+  requirePermission(Permission.USER_CREATE),
+  InvitationController.revoke.bind(InvitationController)
+);
+
 router.get(
   '/team',
   requirePermission(Permission.USER_VIEW),
@@ -122,6 +134,21 @@ router.delete(
   '/team/:id',
   requirePermission(Permission.USER_DELETE),
   settingsController.deleteTeamMember.bind(settingsController)
+);
+
+// ============================================
+// Operations Settings
+// ============================================
+router.get(
+  '/operations',
+  requirePermission(Permission.SETTINGS_VIEW),
+  settingsController.getOperationSettings.bind(settingsController)
+);
+
+router.put(
+  '/operations',
+  requirePermission(Permission.SETTINGS_UPDATE),
+  settingsController.updateOperationSettings.bind(settingsController)
 );
 
 // ============================================

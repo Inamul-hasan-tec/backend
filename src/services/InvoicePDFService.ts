@@ -32,8 +32,13 @@ function partyAddress(parts: Array<string | null | undefined>): string {
 }
 
 function documentTitle(invoice: CompleteInvoice): string {
+  if (invoice.invoice_type === 'tax_invoice') {
+    if (invoice.tax_mode === 'exempt' || invoice.tax_mode === 'no_gst' || !invoice.business_gstin) {
+      return 'Bill of Supply';
+    }
+    return 'Tax Invoice';
+  }
   const labels: Record<string, string> = {
-    tax_invoice: 'Tax Invoice',
     receipt_voucher: 'Receipt Voucher',
     credit_note: 'Credit Note',
     debit_note: 'Debit Note',
@@ -73,8 +78,25 @@ export class InvoicePDFService {
       this.drawAdditionalInformation(doc, invoice);
       this.drawSignatureBlock(doc, invoice);
       this.drawPageFooters(doc, invoice.invoice_number);
+
+      if (invoice.status === 'cancelled' || invoice.status === 'void') {
+        this.drawCancelledWatermark(doc);
+      }
+
       doc.end();
     });
+  }
+
+  private static drawCancelledWatermark(doc: PDFKit.PDFDocument): void {
+    const range = doc.bufferedPageRange();
+    for (let i = range.start; i < range.start + range.count; i++) {
+      doc.switchToPage(i);
+      doc.save();
+      doc.rotate(-30, { origin: [PAGE_WIDTH / 2, 350] });
+      doc.font('Helvetica-Bold').fontSize(62).fillColor('#dc2626').opacity(0.16);
+      doc.text('CANCELLED', PAGE_WIDTH / 2 - 200, 330, { width: 400, align: 'center' });
+      doc.restore();
+    }
   }
 
   private static async loadImageBuffer(url?: string | null): Promise<Buffer | null> {
@@ -171,7 +193,11 @@ export class InvoicePDFService {
       .fontSize(7.5)
       .fillColor('#64748b')
       .text(
-        'Customer total is tax-inclusive where GST applies',
+        invoice.tax_mode === 'inclusive'
+          ? 'Rates are inclusive of GST (where applicable)'
+          : invoice.tax_mode === 'exempt' || invoice.tax_mode === 'no_gst'
+            ? 'Composition / Non-taxable Supply'
+            : 'Rates are exclusive of GST',
         PAGE_WIDTH - MARGIN - 190,
         MARGIN + 38,
         {
@@ -194,7 +220,7 @@ export class InvoicePDFService {
       .font('Helvetica')
       .fontSize(9)
       .fillColor('#475569')
-      .text(invoice.business_gstin ? `GSTIN: ${invoice.business_gstin}` : 'GSTIN: Not provided', MARGIN + 72, MARGIN + 66)
+      .text(invoice.business_gstin ? `GSTIN: ${invoice.business_gstin}` : 'GSTIN: Unregistered', MARGIN + 72, MARGIN + 66)
       .text(`Status: ${String(invoice.status).replace(/_/g, ' ').toUpperCase()}`, PAGE_WIDTH - MARGIN - 190, MARGIN + 69, {
         width: 190,
         align: 'right',
@@ -204,25 +230,50 @@ export class InvoicePDFService {
     this.labelValue(doc, 'Invoice No.', invoice.invoice_number, MARGIN, detailsY, 225);
     this.labelValue(doc, 'Invoice Date', displayDate(invoice.invoice_date), MARGIN + 275, detailsY, 236);
     this.labelValue(doc, 'Due Date', displayDate(invoice.due_date), MARGIN, detailsY + 18, 225);
+    
+    // Place of supply formatting (Rule 46)
+    const posFormatted = invoice.place_of_supply_state_code
+      ? `${invoice.place_of_supply_state_code} - ${invoice.place_of_supply}`
+      : invoice.place_of_supply || '-';
     this.labelValue(
       doc,
-      'Supply',
-      String(invoice.supply_type || '-').replace(/_/g, ' '),
+      'Place of Supply',
+      posFormatted,
       MARGIN + 275,
       detailsY + 18,
       236
     );
+
+    // Reverse charge declaration (Rule 46(p))
+    this.labelValue(
+      doc,
+      'Reverse Charge',
+      'NO',
+      MARGIN,
+      detailsY + 36,
+      225
+    );
+
+    this.labelValue(
+      doc,
+      'Supply Type',
+      String(invoice.supply_type || '-').replace(/_/g, ' '),
+      MARGIN + 275,
+      detailsY + 36,
+      236
+    );
+
     if (invoice.booking_id) {
       this.labelValue(
         doc,
         'Booking Ref.',
         bookingRef(invoice.booking_id),
         MARGIN,
-        detailsY + 36,
+        detailsY + 54,
         225
       );
     }
-    doc.y = detailsY + 56;
+    doc.y = detailsY + 74;
   }
 
   private static drawLogoInitials(doc: PDFKit.PDFDocument, invoice: CompleteInvoice): void {

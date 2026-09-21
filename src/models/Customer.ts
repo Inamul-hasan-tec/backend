@@ -15,9 +15,18 @@ export interface Customer {
   address?: string;
   event_type?: 'wedding' | 'reception' | 'engagement' | 'birthday' | 'corporate' | 'other';
   notes?: string;
-  status: 'active' | 'inactive';
+  status: 'active' | 'inactive' | 'archived';
   created_at: Date;
   updated_at: Date;
+}
+
+export interface CustomerDependencyStats {
+  active_bookings: number;
+  cancelled_bookings: number;
+  payments_count: number;
+  invoices_count: number;
+  total_paid: number;
+  outstanding_balance: number;
 }
 
 export interface CreateCustomerDTO {
@@ -31,7 +40,7 @@ export interface CreateCustomerDTO {
   address?: string;
   event_type?: 'wedding' | 'reception' | 'engagement' | 'birthday' | 'corporate' | 'other';
   notes?: string;
-  status?: 'active' | 'inactive';
+  status?: 'active' | 'inactive' | 'archived';
 }
 
 export interface UpdateCustomerDTO {
@@ -45,7 +54,7 @@ export interface UpdateCustomerDTO {
   address?: string;
   event_type?: 'wedding' | 'reception' | 'engagement' | 'birthday' | 'corporate' | 'other';
   notes?: string;
-  status?: 'active' | 'inactive';
+  status?: 'active' | 'inactive' | 'archived';
 }
 
 export interface CustomerSearchParams {
@@ -53,7 +62,7 @@ export interface CustomerSearchParams {
   phone?: string;
   email?: string;
   city?: string;
-  status?: 'active' | 'inactive';
+  status?: 'active' | 'inactive' | 'archived';
   limit?: number;
   offset?: number;
 }

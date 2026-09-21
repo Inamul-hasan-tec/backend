@@ -14,6 +14,9 @@ export interface Booking {
   slot_id?: number;
   event_type: 'wedding' | 'reception' | 'engagement' | 'birthday' | 'corporate' | 'other';
   guest_count?: number;
+  hall_rate_amount?: number;
+  package_amount?: number;
+  pricing_snapshot?: any;
   total_amount: number;
   advance_amount: number;
   balance_amount: number;
@@ -40,6 +43,7 @@ export interface CreateBookingDTO {
   payment_mode: 'cash' | 'card' | 'upi' | 'bank_transfer' | 'cheque';
   notes?: string;
   created_by?: number;
+  idempotency_key?: string;
 }
 
 export interface UpdateBookingDTO {

@@ -17,6 +17,7 @@ import {
   lockBookingAndValidatePayment,
   recalculateBookingPaymentTotals,
   roundMoney,
+  syncBookingInvoiceBalances,
   updateBookingPaymentTotals,
   validatePositiveMoney,
 } from './PaymentLedgerRepository';
@@ -34,8 +35,10 @@ export class PaymentRepository extends TenantBaseRepository<Payment> {
     let sql = `
       SELECT
         p.*,
-        b.event_date,
+        DATE_FORMAT(p.payment_date, '%Y-%m-%d') AS payment_date,
+        DATE_FORMAT(b.event_date, '%Y-%m-%d') AS event_date,
         b.time_slot,
+        b.status AS booking_status,
         b.payment_status AS booking_payment_status,
         c.name AS customer_name,
         c.phone AS customer_phone,
@@ -66,7 +69,12 @@ export class PaymentRepository extends TenantBaseRepository<Payment> {
   async findByBookingId(bookingId: number): Promise<Payment[]> {
     const tenantId = getTenantId();
     const [rows] = await pool.execute<RowDataPacket[]>(
-      'SELECT * FROM payments WHERE booking_id = ? AND tenant_id = ? ORDER BY payment_date DESC',
+      `SELECT
+         p.*,
+         DATE_FORMAT(p.payment_date, '%Y-%m-%d') AS payment_date
+       FROM payments p
+       WHERE p.booking_id = ? AND p.tenant_id = ?
+       ORDER BY p.payment_date DESC, p.id DESC`,
       [bookingId, tenantId]
     );
     return rows as Payment[];
@@ -243,8 +251,14 @@ export class PaymentRepository extends TenantBaseRepository<Payment> {
         [actorUserId, reason.trim(), paymentId, tenantId]
       );
 
-      await this.recalculateInvoicesAfterPaymentRemoval(connection, tenantId, paymentId);
-      await recalculateBookingPaymentTotals(connection, tenantId, Number(payment.booking_id));
+      await connection.execute(
+        `DELETE FROM invoice_payment_allocations WHERE payment_id = ? AND tenant_id = ?`,
+        [paymentId, tenantId]
+      );
+      if (payment.booking_id) {
+        await syncBookingInvoiceBalances(connection, tenantId, Number(payment.booking_id));
+        await recalculateBookingPaymentTotals(connection, tenantId, Number(payment.booking_id));
+      }
       await connection.commit();
 
       const updated = await this.findById(paymentId);
@@ -292,8 +306,14 @@ export class PaymentRepository extends TenantBaseRepository<Payment> {
         [actorUserId, reason.trim(), paymentId, tenantId]
       );
 
-      await this.recalculateInvoicesAfterPaymentRemoval(connection, tenantId, paymentId);
-      await recalculateBookingPaymentTotals(connection, tenantId, Number(payment.booking_id));
+      await connection.execute(
+        `DELETE FROM invoice_payment_allocations WHERE payment_id = ? AND tenant_id = ?`,
+        [paymentId, tenantId]
+      );
+      if (payment.booking_id) {
+        await syncBookingInvoiceBalances(connection, tenantId, Number(payment.booking_id));
+        await recalculateBookingPaymentTotals(connection, tenantId, Number(payment.booking_id));
+      }
       await connection.commit();
 
       const updated = await this.findById(paymentId);
@@ -391,32 +411,70 @@ export class PaymentRepository extends TenantBaseRepository<Payment> {
     const [summaryRows] = await pool.execute<RowDataPacket[]>(
       `SELECT
         COUNT(*) AS total_records,
-        SUM(CASE WHEN COALESCE(status, 'recorded') NOT IN ('reversed', 'refunded', 'failed') THEN 1 ELSE 0 END) AS active_count,
-        COALESCE(SUM(CASE WHEN COALESCE(status, 'recorded') NOT IN ('reversed', 'refunded', 'failed') THEN amount ELSE 0 END), 0) AS active_amount,
-        SUM(CASE WHEN COALESCE(status, 'recorded') = 'recorded' THEN 1 ELSE 0 END) AS needs_verification_count,
-        COALESCE(SUM(CASE WHEN COALESCE(status, 'recorded') = 'recorded' THEN amount ELSE 0 END), 0) AS needs_verification_amount,
-        SUM(CASE WHEN COALESCE(status, 'recorded') = 'verified' THEN 1 ELSE 0 END) AS verified_count,
-        COALESCE(SUM(CASE WHEN COALESCE(status, 'recorded') = 'verified' THEN amount ELSE 0 END), 0) AS verified_amount,
-        SUM(CASE WHEN COALESCE(status, 'recorded') = 'failed' THEN 1 ELSE 0 END) AS failed_count,
-        SUM(CASE WHEN COALESCE(status, 'recorded') = 'reversed' THEN 1 ELSE 0 END) AS reversed_count,
         SUM(CASE
-          WHEN COALESCE(status, 'recorded') NOT IN ('reversed', 'refunded', 'failed')
-           AND payment_mode IN ('upi', 'bank_transfer', 'cheque', 'card')
-           AND (transaction_id IS NULL OR TRIM(transaction_id) = '')
+          WHEN COALESCE(p.status, 'recorded') NOT IN ('reversed', 'refunded', 'failed')
+           AND COALESCE(b.status, '') <> 'cancelled'
+          THEN 1 ELSE 0
+        END) AS active_count,
+        COALESCE(SUM(CASE
+          WHEN COALESCE(p.status, 'recorded') NOT IN ('reversed', 'refunded', 'failed')
+           AND COALESCE(b.status, '') <> 'cancelled'
+          THEN p.amount ELSE 0
+        END), 0) AS active_amount,
+        SUM(CASE
+          WHEN COALESCE(p.status, 'recorded') = 'recorded'
+           AND COALESCE(b.status, '') <> 'cancelled'
+          THEN 1 ELSE 0
+        END) AS needs_verification_count,
+        COALESCE(SUM(CASE
+          WHEN COALESCE(p.status, 'recorded') = 'recorded'
+           AND COALESCE(b.status, '') <> 'cancelled'
+          THEN p.amount ELSE 0
+        END), 0) AS needs_verification_amount,
+        SUM(CASE
+          WHEN COALESCE(p.status, 'recorded') = 'verified'
+           AND COALESCE(b.status, '') <> 'cancelled'
+          THEN 1 ELSE 0
+        END) AS verified_count,
+        COALESCE(SUM(CASE
+          WHEN COALESCE(p.status, 'recorded') = 'verified'
+           AND COALESCE(b.status, '') <> 'cancelled'
+          THEN p.amount ELSE 0
+        END), 0) AS verified_amount,
+        SUM(CASE WHEN COALESCE(p.status, 'recorded') = 'failed' THEN 1 ELSE 0 END) AS failed_count,
+        SUM(CASE WHEN COALESCE(p.status, 'recorded') = 'reversed' THEN 1 ELSE 0 END) AS reversed_count,
+        SUM(CASE
+          WHEN COALESCE(p.status, 'recorded') NOT IN ('reversed', 'refunded', 'failed')
+           AND COALESCE(b.status, '') <> 'cancelled'
+           AND p.payment_mode IN ('upi', 'bank_transfer', 'cheque', 'card')
+           AND (p.transaction_id IS NULL OR TRIM(p.transaction_id) = '')
           THEN 1 ELSE 0
         END) AS missing_reference_count,
         COALESCE(SUM(CASE
-          WHEN COALESCE(status, 'recorded') NOT IN ('reversed', 'refunded', 'failed')
-           AND DATE(payment_date) = CURRENT_DATE()
-          THEN amount ELSE 0
+          WHEN COALESCE(p.status, 'recorded') NOT IN ('reversed', 'refunded', 'failed')
+           AND COALESCE(b.status, '') <> 'cancelled'
+           AND DATE(p.payment_date) = CURRENT_DATE()
+          THEN p.amount ELSE 0
         END), 0) AS today_active_amount,
         SUM(CASE
-          WHEN COALESCE(status, 'recorded') NOT IN ('reversed', 'refunded', 'failed')
-           AND DATE(payment_date) = CURRENT_DATE()
+          WHEN COALESCE(p.status, 'recorded') NOT IN ('reversed', 'refunded', 'failed')
+           AND COALESCE(b.status, '') <> 'cancelled'
+           AND DATE(p.payment_date) = CURRENT_DATE()
           THEN 1 ELSE 0
-        END) AS today_active_count
-       FROM payments
-       WHERE tenant_id = ?`,
+        END) AS today_active_count,
+        SUM(CASE
+          WHEN COALESCE(p.status, 'recorded') NOT IN ('reversed', 'refunded', 'failed')
+           AND b.status = 'cancelled'
+          THEN 1 ELSE 0
+        END) AS cancelled_decision_count,
+        COALESCE(SUM(CASE
+          WHEN COALESCE(p.status, 'recorded') NOT IN ('reversed', 'refunded', 'failed')
+           AND b.status = 'cancelled'
+          THEN p.amount ELSE 0
+        END), 0) AS cancelled_decision_amount
+       FROM payments p
+       LEFT JOIN bookings b ON b.id = p.booking_id AND b.tenant_id = p.tenant_id
+       WHERE p.tenant_id = ?`,
       [tenantId]
     );
 
@@ -430,13 +488,14 @@ export class PaymentRepository extends TenantBaseRepository<Payment> {
         p.payment_type,
         p.transaction_id,
         COALESCE(p.status, 'recorded') AS status,
-        p.payment_date,
+        DATE_FORMAT(p.payment_date, '%Y-%m-%d') AS payment_date,
         p.verified_at,
         p.reversed_at,
         p.reversal_reason,
         p.failure_reason,
-        b.event_date,
+        DATE_FORMAT(b.event_date, '%Y-%m-%d') AS event_date,
         b.time_slot,
+        b.status AS booking_status,
         c.name AS customer_name,
         h.name AS hall_name,
         CASE

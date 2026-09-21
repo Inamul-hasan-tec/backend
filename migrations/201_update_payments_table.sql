@@ -2,6 +2,18 @@
 -- Description: Add subscription-related columns to existing payments table
 -- Date: 2026-01-10
 
+-- Ensure tenant_id column in payments table
+SET @col_exists = (SELECT COUNT(*) FROM information_schema.COLUMNS 
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'payments' AND COLUMN_NAME = 'tenant_id');
+SET @sql = IF(@col_exists = 0, 'ALTER TABLE payments ADD COLUMN tenant_id INT NOT NULL DEFAULT 1 AFTER id', 'SELECT "Column tenant_id in payments already exists"');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+-- Ensure tenant_id column in packages table
+SET @col_exists = (SELECT COUNT(*) FROM information_schema.COLUMNS 
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'packages' AND COLUMN_NAME = 'tenant_id');
+SET @sql = IF(@col_exists = 0, 'ALTER TABLE packages ADD COLUMN tenant_id INT NOT NULL DEFAULT 1 AFTER id', 'SELECT "Column tenant_id in packages already exists"');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
 -- Add subscription_id column
 SET @col_exists = (SELECT COUNT(*) FROM information_schema.COLUMNS 
   WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'payments' AND COLUMN_NAME = 'subscription_id');

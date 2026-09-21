@@ -27,6 +27,8 @@ import {
   insertBookingPayment,
   lockBookingAndValidatePayment,
   lockInvoicesForAllocation,
+  syncAllBookingInvoiceBalances,
+  syncBookingInvoiceBalances,
   updateBookingPaymentTotals,
   validateAllocationTotal,
   validatePositiveMoney,
@@ -38,30 +40,49 @@ export class InvoiceRepository extends TenantBaseRepository<Invoice> {
   }
 
   /**
-   * Generate next invoice number
+   * Helper to calculate Indian Financial Year (e.g., '26-27')
    */
-  async generateInvoiceNumber(invoiceType: string): Promise<string> {
-    // In V2, we generate this via query or app logic since SP was dropped
-    const tenantId = getTenantId();
-    const prefix = invoiceType === 'tax_invoice' ? 'INV' : 'REC';
+  static getIndianFinancialYear(date: Date = new Date()): string {
+    const d = date instanceof Date ? date : new Date(date);
+    const month = d.getMonth(); // 0 = Jan, 3 = April
+    const year = d.getFullYear();
+    const startYear = month >= 3 ? year : year - 1;
+    const endYear = startYear + 1;
+    const startStr = String(startYear).slice(-2);
+    const endStr = String(endYear).slice(-2);
+    return `${startStr}-${endStr}`;
+  }
 
-    // Find the latest invoice number for this type and tenant
+  /**
+   * Generate next invoice number for preview (non-mutating)
+   */
+  async generateInvoiceNumber(invoiceType: string, date: Date = new Date()): Promise<string> {
+    const tenantId = getTenantId();
+    const fy = InvoiceRepository.getIndianFinancialYear(date);
+    const typeMap: Record<string, string> = {
+      tax_invoice: 'INV',
+      receipt_voucher: 'REC',
+      credit_note: 'CN',
+      debit_note: 'DN',
+    };
+    const docType = typeMap[invoiceType] || 'DOC';
+
+    // Get prefix from business_config
+    const [bizRows] = await pool.query<RowDataPacket[]>(
+      `SELECT invoice_prefix FROM business_config WHERE tenant_id = ? LIMIT 1`,
+      [tenantId]
+    );
+    const prefix = (bizRows[0]?.invoice_prefix || 'HS').toUpperCase().trim();
+
     const [rows] = await pool.query<RowDataPacket[]>(
-      `SELECT invoice_number FROM invoices
-       WHERE tenant_id = ? AND invoice_type = ?
-       ORDER BY id DESC LIMIT 1`,
-      [tenantId, invoiceType]
+      `SELECT current_val FROM invoice_sequences
+       WHERE tenant_id = ? AND doc_type = ? AND financial_year = ?
+       LIMIT 1`,
+      [tenantId, docType, fy]
     );
 
-    let nextNumber = 1;
-    if (rows.length > 0) {
-      const lastNumberStr = rows[0].invoice_number.split('-').pop();
-      nextNumber = parseInt(lastNumberStr, 10) + 1;
-    }
-
-    // Format: INV-YYYYMM-[TenantID]-0001
-    const dateStr = new Date().toISOString().slice(0, 7).replace('-', '');
-    return `${prefix}-${dateStr}-T${tenantId}-${nextNumber.toString().padStart(4, '0')}`;
+    const nextVal = (rows[0]?.current_val || 0) + 1;
+    return `${prefix}/${fy}/${docType}/${nextVal.toString().padStart(4, '0')}`;
   }
 
   /**
@@ -90,7 +111,7 @@ export class InvoiceRepository extends TenantBaseRepository<Invoice> {
     // Get business config
     const [businessRows] = await pool.query<RowDataPacket[]>(
       `SELECT
-        business_name, gstin, address, city, state, state_code,
+        business_name, gstin, is_gst_registered, address, city, state, state_code,
         pincode, phone, email, invoice_prefix
       FROM business_config
       WHERE tenant_id = ?
@@ -126,7 +147,45 @@ export class InvoiceRepository extends TenantBaseRepository<Invoice> {
       // Get customer and business details
       const { customer, business } = await this.getInvoiceParties(data.customer_id);
 
-      // Calculate GST (simplified for V2 schema mapping)
+      // GST Registration gate: Unregistered venues cannot issue Tax Invoices
+      const isRegistered = Boolean(
+        business.is_gst_registered &&
+        business.gstin &&
+        business.gstin.trim().length === 15
+      );
+
+      if (data.invoice_type === 'tax_invoice' && !isRegistered) {
+        throw new Error(
+          'This venue is not configured as GST registered. Unregistered businesses cannot issue official Tax Invoices. Please issue a Bill of Supply or Receipt Voucher instead.'
+        );
+      }
+
+      // Determine Place of Supply. Official tax invoices must receive an
+      // explicit POS from the caller; the UI may prefill venue state only when
+      // the operator confirms a local unregistered customer.
+      const explicitPosStateCode = data.place_of_supply_state_code?.trim();
+      if (data.invoice_type === 'tax_invoice' && !explicitPosStateCode) {
+        throw new Error(
+          'Place of Supply state code is mandatory for official Tax Invoices. Select the customer state or confirm local unregistered customer.'
+        );
+      }
+      const posStateCode = GSTCalculator.normalizeStateCode(
+        explicitPosStateCode || customer.state_code || business.state_code
+      );
+      if (!GSTCalculator.isValidStateCode(posStateCode)) {
+        throw new Error('A valid 2-digit Place of Supply state code is mandatory for invoice creation');
+      }
+      const posStateName = GSTCalculator.getStateName(posStateCode);
+      const posReason = data.place_of_supply_reason || (
+        !customer.gstin && posStateCode === GSTCalculator.normalizeStateCode(business.state_code)
+          ? 'Local supply to unregistered recipient'
+          : null
+      );
+
+      // Determine tax mode
+      const taxMode = data.tax_mode || (isRegistered ? 'inclusive' : 'no_gst');
+
+      // Calculate GST
       const lineItems = data.line_items.map(item => ({
         description: item.description,
         quantity: item.quantity,
@@ -136,21 +195,84 @@ export class InvoiceRepository extends TenantBaseRepository<Invoice> {
           : 0,
         gst_rate: item.gst_rate,
         sac_hsn: item.sac_hsn,
+        tax_treatment: item.tax_treatment || 'taxable',
       }));
 
       const gstResult = GSTCalculator.calculateGST(
         lineItems,
         business.state_code,
-        customer.state_code || business.state_code,
+        posStateCode,
         true,
-        data.discount_amount || 0
+        data.discount_amount || 0,
+        taxMode
       );
 
-      // Generate invoice number
-      const invoiceNumber = await this.generateInvoiceNumber(data.invoice_type);
+      if (data.booking_id && data.invoice_type === 'tax_invoice') {
+        const [existingInvoices] = await connection.query<RowDataPacket[]>(
+          `SELECT id, invoice_number, status
+           FROM invoices
+           WHERE tenant_id = ? AND booking_id = ? AND invoice_type = 'tax_invoice' AND status NOT IN ('cancelled', 'void')`,
+          [tenantId, data.booking_id]
+        );
+        if (existingInvoices.length > 0) {
+          if (data.original_invoice_id && existingInvoices.some((inv) => inv.id === data.original_invoice_id)) {
+            // Atomic replacement: Cancel previous invoice and clear its allocations
+            await connection.execute(
+              `UPDATE invoices
+               SET status = 'cancelled',
+                   cancellation_reason = ?,
+                   cancelled_at = NOW(),
+                   updated_at = NOW()
+               WHERE id = ? AND tenant_id = ?`,
+              [
+                data.notes?.includes('Cancellation reason:')
+                  ? data.notes
+                  : 'Superseded by replacement invoice',
+                data.original_invoice_id,
+                tenantId,
+              ]
+            );
+            await connection.execute(
+              `DELETE FROM invoice_payment_allocations WHERE invoice_id = ? AND tenant_id = ?`,
+              [data.original_invoice_id, tenantId]
+            );
+          } else {
+            throw new Error(
+              `An active official tax invoice (${existingInvoices[0].invoice_number}) already exists for this booking. Please cancel or replace the existing invoice first.`
+            );
+          }
+        }
+      }
+
+      // Concurrency-safe Financial Year invoice numbering using invoice_sequences row lock
+      const invoiceDate = data.invoice_date || new Date();
+      const financialYear = data.financial_year || InvoiceRepository.getIndianFinancialYear(invoiceDate);
+      const typeMap: Record<string, string> = {
+        tax_invoice: 'INV',
+        receipt_voucher: 'REC',
+        credit_note: 'CN',
+        debit_note: 'DN',
+      };
+      const docType = typeMap[data.invoice_type] || 'DOC';
+      const prefix = (business.invoice_prefix || 'HS').toUpperCase().trim();
+
+      await connection.query(
+        `INSERT INTO invoice_sequences (tenant_id, doc_type, financial_year, current_val)
+         VALUES (?, ?, ?, 1)
+         ON DUPLICATE KEY UPDATE current_val = current_val + 1`,
+        [tenantId, docType, financialYear]
+      );
+
+      const [seqRows] = await connection.query<RowDataPacket[]>(
+        `SELECT current_val FROM invoice_sequences
+         WHERE tenant_id = ? AND doc_type = ? AND financial_year = ?
+         FOR UPDATE`,
+        [tenantId, docType, financialYear]
+      );
+      const nextSequence = seqRows[0]?.current_val || 1;
+      const invoiceNumber = `${prefix}/${financialYear}/${docType}/${nextSequence.toString().padStart(4, '0')}`;
 
       // Calculate due date (30 days from invoice date if not provided)
-      const invoiceDate = data.invoice_date || new Date();
       const dueDate = data.due_date || new Date(invoiceDate.getTime() + 30 * 24 * 60 * 60 * 1000);
 
       // Insert invoice
@@ -186,7 +308,11 @@ export class InvoiceRepository extends TenantBaseRepository<Invoice> {
           business_phone: business.phone || '',
           business_email: business.email || '',
           supply_type: gstResult.supply_type,
-          place_of_supply: customer.state || business.state || '',
+          place_of_supply: posStateName,
+          place_of_supply_state_code: posStateCode,
+          place_of_supply_reason: posReason,
+          financial_year: financialYear,
+          tax_mode: taxMode,
           subtotal: gstResult.subtotal,
           discount_amount: gstResult.discount_amount,
           taxable_amount: gstResult.taxable_amount,
@@ -226,6 +352,7 @@ export class InvoiceRepository extends TenantBaseRepository<Invoice> {
             unit: sourceItem.unit,
             unit_price: item.unit_price,
             line_subtotal: item.line_subtotal,
+            tax_treatment: item.tax_treatment || 'taxable',
             gst_rate: sourceItem.gst_rate,
             discount_percentage: sourceItem.discount_percentage || 0,
             discount_amount: item.discount_amount || 0,
@@ -270,7 +397,7 @@ export class InvoiceRepository extends TenantBaseRepository<Invoice> {
    */
   async getInvoiceById(id: number): Promise<(Invoice & { line_items: InvoiceLineItem[] }) | null> {
     const tenantId = getTenantId();
-    const [invoiceRows] = await pool.query<RowDataPacket[]>(
+    let [invoiceRows] = await pool.query<RowDataPacket[]>(
       `SELECT i.*, bc.logo_url AS business_logo_url
        FROM invoices i
        LEFT JOIN business_config bc ON bc.tenant_id = i.tenant_id
@@ -280,6 +407,30 @@ export class InvoiceRepository extends TenantBaseRepository<Invoice> {
 
     if (invoiceRows.length === 0) {
       return null;
+    }
+
+    if (invoiceRows[0].booking_id && !['cancelled', 'void'].includes(invoiceRows[0].status)) {
+      const conn = await pool.getConnection();
+      try {
+        await conn.beginTransaction();
+        await syncBookingInvoiceBalances(conn, tenantId, Number(invoiceRows[0].booking_id));
+        await conn.commit();
+      } catch (syncErr) {
+        await conn.rollback();
+      } finally {
+        conn.release();
+      }
+
+      const [refreshedRows] = await pool.query<RowDataPacket[]>(
+        `SELECT i.*, bc.logo_url AS business_logo_url
+         FROM invoices i
+         LEFT JOIN business_config bc ON bc.tenant_id = i.tenant_id
+         WHERE i.id = ? AND i.tenant_id = ?`,
+        [id, tenantId]
+      );
+      if (refreshedRows.length > 0) {
+        invoiceRows = refreshedRows;
+      }
     }
 
     const [lineItemRows] = await pool.query<RowDataPacket[]>(
@@ -331,6 +482,21 @@ export class InvoiceRepository extends TenantBaseRepository<Invoice> {
    */
   async getAllInvoices(filters?: InvoiceFilters): Promise<Invoice[]> {
     const tenantId = getTenantId();
+    const conn = await pool.getConnection();
+    try {
+      await conn.beginTransaction();
+      if (filters?.booking_id) {
+        await syncBookingInvoiceBalances(conn, tenantId, Number(filters.booking_id));
+      } else {
+        await syncAllBookingInvoiceBalances(conn, tenantId);
+      }
+      await conn.commit();
+    } catch (syncErr) {
+      await conn.rollback();
+    } finally {
+      conn.release();
+    }
+
     let query = 'SELECT * FROM invoices WHERE tenant_id = ?';
     const params: any[] = [tenantId];
 
@@ -418,16 +584,46 @@ export class InvoiceRepository extends TenantBaseRepository<Invoice> {
   /**
    * Cancel invoice
    */
-  async cancel(id: number, reason: string): Promise<boolean> {
+  async cancel(id: number, reason?: string): Promise<boolean> {
     const tenantId = getTenantId();
-    const [result] = await pool.query<ResultSetHeader>(
-      `UPDATE invoices
-       SET status = 'cancelled', updated_at = NOW()
-       WHERE id = ? AND status IN ('draft', 'issued') AND tenant_id = ?`,
-      [id, tenantId]
-    );
+    const connection = await pool.getConnection();
+    try {
+      await connection.beginTransaction();
+      const cancelReason = (reason && reason.trim()) ? reason.trim() : 'Cancelled by user';
+      const [result] = await connection.query<ResultSetHeader>(
+        `UPDATE invoices
+         SET status = 'cancelled',
+             notes = CONCAT(COALESCE(notes, ''), '\nCancellation reason: ', ?),
+             updated_at = NOW()
+         WHERE id = ? AND status IN ('draft', 'issued') AND tenant_id = ?`,
+        [cancelReason, id, tenantId]
+      );
 
-    return result.affectedRows > 0;
+      if (result.affectedRows > 0) {
+        const [invRows] = await connection.query<RowDataPacket[]>(
+          `SELECT booking_id FROM invoices WHERE id = ? AND tenant_id = ?`,
+          [id, tenantId]
+        );
+        const bookingId = invRows[0]?.booking_id;
+
+        await connection.query(
+          `DELETE FROM invoice_payment_allocations WHERE invoice_id = ? AND tenant_id = ?`,
+          [id, tenantId]
+        );
+
+        if (bookingId) {
+          await syncBookingInvoiceBalances(connection, tenantId, Number(bookingId));
+        }
+      }
+
+      await connection.commit();
+      return result.affectedRows > 0;
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
   }
 
   /**
@@ -464,20 +660,21 @@ export class InvoiceRepository extends TenantBaseRepository<Invoice> {
         bookingId,
         paymentAmount
       );
-      const referenceRequired = ['upi', 'bank_transfer', 'cheque', 'card'].includes(data.payment_mode);
-      const transactionReference = referenceRequired ? data.transaction_reference?.trim() || null : null;
-      const cashReferenceNote =
-        !referenceRequired && data.transaction_reference?.trim()
-          ? `Cash counter reference/note: ${data.transaction_reference.trim()}`
-          : '';
-      const notes = [data.notes?.trim(), cashReferenceNote].filter(Boolean).join('\n') || null;
+      const transactionReference = data.transaction_reference?.trim() || null;
+      const notes = data.notes?.trim() || null;
 
-      await assertUniqueTransactionReference(
-        connection,
-        tenantId,
-        transactionReference
-      );
+      if (['upi', 'bank_transfer', 'cheque', 'card'].includes(data.payment_mode)) {
+        await assertUniqueTransactionReference(
+          connection,
+          tenantId,
+          transactionReference
+        );
+      }
       const receiptNumber = await generatePaymentReceiptNumber(connection, tenantId);
+      const paymentDate = typeof data.payment_date === 'string'
+        ? data.payment_date.slice(0, 10)
+        : data.payment_date;
+
       const paymentId = await insertBookingPayment(connection, {
         tenantId,
         bookingId,
@@ -485,7 +682,7 @@ export class InvoiceRepository extends TenantBaseRepository<Invoice> {
         paymentMode: data.payment_mode,
         paymentType: 'balance',
         transactionId: transactionReference,
-        paymentDate: data.payment_date,
+        paymentDate,
         notes,
         receivedBy: data.received_by || null,
         status: 'recorded',
@@ -517,6 +714,17 @@ export class InvoiceRepository extends TenantBaseRepository<Invoice> {
    */
   async getSummary(filters?: InvoiceFilters): Promise<InvoiceSummary> {
     const tenantId = getTenantId();
+    const conn = await pool.getConnection();
+    try {
+      await conn.beginTransaction();
+      await syncAllBookingInvoiceBalances(conn, tenantId);
+      await conn.commit();
+    } catch (syncErr) {
+      await conn.rollback();
+    } finally {
+      conn.release();
+    }
+
     let query = `
       SELECT
         COUNT(*) as total_invoices,

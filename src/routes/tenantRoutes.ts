@@ -66,6 +66,16 @@ router.post('/:id/owner-invitations/:invitationId/resend',
   InvitationController.resendOwnerInvitation.bind(InvitationController)
 );
 
+router.delete('/:id/owner-invitations/:invitationId',
+  requireSuperAdmin(),
+  InvitationController.revokeOwnerInvitation.bind(InvitationController)
+);
+
+router.post('/:id/owner-invitations/:invitationId/revoke',
+  requireSuperAdmin(),
+  InvitationController.revokeOwnerInvitation.bind(InvitationController)
+);
+
 router.get('/:id/halls',
   requireSuperAdmin(),
   TenantController.getHalls

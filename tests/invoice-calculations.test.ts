@@ -62,6 +62,53 @@ export function testInvoiceCalculations() {
   assert.equal(rounded.total_tax, 18);
   assert.equal(rounded.round_off, -0.01);
   assert.equal(rounded.grand_total, 118);
+
+  // Inclusive GST test (Audit requirement: Rs 90,000 inclusive @ 18% = 76,271.19 taxable + 6,864.41 CGST + 6,864.40 SGST)
+  const inclusiveIntra = GSTCalculator.calculateGST(
+    [{ ...baseLine, unit_price: 90000, quantity: 1, gst_rate: 18 }],
+    '29',
+    '29',
+    true,
+    0,
+    'inclusive'
+  );
+  assert.equal(inclusiveIntra.subtotal, 90000);
+  assert.equal(inclusiveIntra.taxable_amount, 76271.19);
+  assert.equal(inclusiveIntra.cgst_amount, 6864.41);
+  assert.equal(inclusiveIntra.sgst_amount, 6864.40);
+  assert.equal(inclusiveIntra.total_tax, 13728.81);
+  assert.equal(inclusiveIntra.grand_total, 90000);
+  assert.equal(inclusiveIntra.round_off, 0);
+
+  // Interstate inclusive test
+  const inclusiveInter = GSTCalculator.calculateGST(
+    [{ ...baseLine, unit_price: 90000, quantity: 1, gst_rate: 18 }],
+    '29',
+    '33',
+    true,
+    0,
+    'inclusive'
+  );
+  assert.equal(inclusiveInter.subtotal, 90000);
+  assert.equal(inclusiveInter.taxable_amount, 76271.19);
+  assert.equal(inclusiveInter.cgst_amount, 0);
+  assert.equal(inclusiveInter.sgst_amount, 0);
+  assert.equal(inclusiveInter.igst_amount, 13728.81);
+  assert.equal(inclusiveInter.total_tax, 13728.81);
+  assert.equal(inclusiveInter.grand_total, 90000);
+
+  // Exempt tax treatment test
+  const exemptItem = GSTCalculator.calculateGST(
+    [{ ...baseLine, unit_price: 50000, quantity: 1, gst_rate: 18, tax_treatment: 'exempt' }],
+    '29',
+    '29',
+    true,
+    0,
+    'inclusive'
+  );
+  assert.equal(exemptItem.taxable_amount, 50000);
+  assert.equal(exemptItem.total_tax, 0);
+  assert.equal(exemptItem.grand_total, 50000);
 }
 
 export function testInvoiceCalculationValidation() {

@@ -97,19 +97,46 @@ export const updateCustomer = asyncHandler(async (req: Request, res: Response) =
 });
 
 /**
+ * GET /api/customers/:id/dependencies
+ * Get customer dependency statistics
+ */
+export const getCustomerDependencies = asyncHandler(async (req: Request, res: Response) => {
+  const id = parseInt(req.params.id);
+  const stats = await customerService.getCustomerDependencies(id);
+  res.json(successResponse('Customer dependency statistics retrieved', stats));
+});
+
+/**
+ * POST /api/customers/:id/archive
+ * Archive customer
+ */
+export const archiveCustomer = asyncHandler(async (req: Request, res: Response) => {
+  const id = parseInt(req.params.id);
+  const reason = (req.body.reason || '').trim();
+  const actorId = (req as any).user?.id || 0;
+
+  if (!reason) {
+    return res.status(400).json(errorResponse('Archival reason is required'));
+  }
+
+  await customerService.archiveCustomer(id, reason, actorId);
+  const customer = await customerService.getCustomerById(id);
+  res.json(successResponse('Customer archived successfully', customer));
+});
+
+/**
  * DELETE /api/customers/:id
- * Delete customer
+ * Delete customer (Owner only, 0 dependencies)
  */
 export const deleteCustomer = asyncHandler(async (req: Request, res: Response) => {
   const id = parseInt(req.params.id);
+  const user = (req as any).user;
+  const isOwner = Boolean(user?.is_super_admin || user?.role === 'admin');
+
   try {
-    await customerService.deleteCustomer(id);
-    res.json(successResponse('Customer deleted successfully'));
+    await customerService.deleteCustomer(id, isOwner);
+    res.json(successResponse('Customer deleted permanently'));
   } catch (error: any) {
-    if (error.message && error.message.includes('foreign key constraint')) {
-      res.status(400).json(errorResponse('Cannot delete customer: Customer has associated bookings. Please delete bookings first or deactivate the customer instead.'));
-    } else {
-      throw error;
-    }
+    res.status(400).json(errorResponse(error.message || 'Failed to delete customer'));
   }
 });

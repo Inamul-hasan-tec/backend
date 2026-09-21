@@ -295,4 +295,134 @@ export class SettingsRepository {
       );
     } catch {}
   }
+
+  // ============================================
+  // ============================================
+  // Operations Settings
+  // ============================================
+  async getOperationSettings(tenantId_ignored: number): Promise<any> {
+    const tenantId = getTenantId();
+    await this.ensureOperationSettings(tenantId);
+    const [rows] = await pool.query<RowDataPacket[]>(
+      'SELECT * FROM tenant_operation_settings WHERE tenant_id = ?',
+      [tenantId]
+    );
+    const row = rows[0] || null;
+    if (row) {
+      row.operations_profile = detectOperationProfile(row);
+    }
+    return row;
+  }
+
+  async updateOperationSettings(tenantId_ignored: number, data: any): Promise<any> {
+    const tenantId = getTenantId();
+    await this.ensureOperationSettings(tenantId);
+
+    // Auto-detect profile if not explicitly set or if modifying switches
+    if (data.operations_profile === undefined) {
+      // Will be normalized when loaded
+    }
+
+    const allowedFields = [
+      'operations_profile',
+      'enable_event_readiness',
+      'include_inventory_in_readiness',
+      'include_staff_in_readiness',
+      'include_payment_in_readiness',
+      'include_invoice_in_readiness',
+      'employee_mode',
+      'enable_employee_attendance',
+      'enable_employee_conflict_warnings',
+      'require_staff_for_event_closeout',
+      'enable_vendor_payout_tracking',
+      'enable_weekly_roster',
+    ];
+    const fields: string[] = [];
+    const values: any[] = [];
+
+    for (const field of allowedFields) {
+      if (data[field] !== undefined) {
+        fields.push(`${field} = ?`);
+        values.push(data[field]);
+      }
+    }
+
+    if (fields.length > 0) {
+      values.push(tenantId);
+      await pool.query(
+        `UPDATE tenant_operation_settings SET ${fields.join(', ')}, updated_at = NOW() WHERE tenant_id = ?`,
+        values
+      );
+    }
+
+    return await this.getOperationSettings(tenantId);
+  }
+
+  private async ensureOperationSettings(tenantId: number): Promise<void> {
+    await pool.query(
+      `INSERT INTO tenant_operation_settings (tenant_id)
+       VALUES (?)
+       ON DUPLICATE KEY UPDATE tenant_id = tenant_id`,
+      [tenantId]
+    );
+  }
+}
+
+export function detectOperationProfile(s: any): 'simple' | 'standard' | 'full' | 'custom' {
+  if (!s) return 'standard';
+
+  const b = (val: any) => Boolean(val === true || val === 1 || val === '1');
+
+  // Simple Demo exact match
+  if (
+    s.employee_mode === 'simple' &&
+    b(s.enable_event_readiness) === true &&
+    b(s.include_inventory_in_readiness) === false &&
+    b(s.include_staff_in_readiness) === false &&
+    b(s.include_payment_in_readiness) === true &&
+    b(s.include_invoice_in_readiness) === false &&
+    b(s.enable_employee_attendance) === false &&
+    b(s.enable_employee_conflict_warnings) === false &&
+    b(s.require_staff_for_event_closeout) === false &&
+    b(s.enable_vendor_payout_tracking) === false &&
+    b(s.enable_weekly_roster) === false
+  ) {
+    return 'simple';
+  }
+
+  // Recommended (standard) exact match
+  if (
+    s.employee_mode === 'event_staffing' &&
+    b(s.enable_event_readiness) === true &&
+    b(s.include_inventory_in_readiness) === true &&
+    b(s.include_staff_in_readiness) === true &&
+    b(s.include_payment_in_readiness) === true &&
+    b(s.include_invoice_in_readiness) === true &&
+    b(s.enable_employee_attendance) === true &&
+    b(s.enable_employee_conflict_warnings) === true &&
+    b(s.require_staff_for_event_closeout) === false &&
+    b(s.enable_vendor_payout_tracking) === false &&
+    b(s.enable_weekly_roster) === false
+  ) {
+    return 'standard';
+  }
+
+  // Strict Control (full) exact match
+  if (
+    s.employee_mode === 'advanced' &&
+    b(s.enable_event_readiness) === true &&
+    b(s.include_inventory_in_readiness) === true &&
+    b(s.include_staff_in_readiness) === true &&
+    b(s.include_payment_in_readiness) === true &&
+    b(s.include_invoice_in_readiness) === true &&
+    b(s.enable_employee_attendance) === true &&
+    b(s.enable_employee_conflict_warnings) === true &&
+    b(s.require_staff_for_event_closeout) === true &&
+    b(s.enable_vendor_payout_tracking) === true &&
+    b(s.enable_weekly_roster) === true
+  ) {
+    return 'full';
+  }
+
+  return 'custom';
 }

@@ -325,17 +325,11 @@ export class InvoiceController {
   async cancelInvoice(req: Request, res: Response): Promise<void> {
     try {
       const { id } = req.params;
-      const { reason } = req.body;
+      const cancelReason = (typeof req.body?.reason === 'string' && req.body.reason.trim())
+        ? req.body.reason.trim()
+        : 'Cancelled by user';
 
-      if (!reason) {
-        res.status(400).json({
-          success: false,
-          message: 'Cancellation reason is required',
-        });
-        return;
-      }
-
-      const cancelled = await InvoiceRepository.cancel(parseInt(id), reason);
+      const cancelled = await InvoiceRepository.cancel(parseInt(id), cancelReason);
 
       if (!cancelled) {
         res.status(400).json({
@@ -491,10 +485,11 @@ export class InvoiceController {
 
       const pdf = await InvoicePDFService.generate(invoice);
       const safeInvoiceNumber = invoice.invoice_number.replace(/[^a-zA-Z0-9_-]/g, '_');
+      const isInline = req.query.inline === 'true' || req.query.preview === 'true';
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader(
         'Content-Disposition',
-        `attachment; filename="${safeInvoiceNumber}.pdf"`
+        `${isInline ? 'inline' : 'attachment'}; filename="${safeInvoiceNumber}.pdf"`
       );
       res.setHeader('Content-Length', pdf.length.toString());
       res.send(pdf);
@@ -503,6 +498,40 @@ export class InvoiceController {
       res.status(500).json({
         success: false,
         message: 'Failed to generate PDF',
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
+  }
+
+  /**
+   * GET /api/invoices/:id/email-preview
+   * Get preview of the invoice email HTML and metadata without sending
+   */
+  async previewInvoiceEmail(req: Request, res: Response): Promise<void> {
+    try {
+      const { id } = req.params;
+      const invoice = await InvoiceRepository.getInvoiceById(parseInt(id));
+
+      if (!invoice) {
+        res.status(404).json({
+          success: false,
+          message: 'Invoice not found',
+        });
+        return;
+      }
+
+      const emailService = new InvoiceEmailService();
+      const preview = emailService.getInvoiceEmailPreview(invoice);
+
+      res.json({
+        success: true,
+        data: preview,
+      });
+    } catch (error) {
+      console.error('Error generating email preview:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to generate invoice email preview',
         error: error instanceof Error ? error.message : 'Unknown error',
       });
     }

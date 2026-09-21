@@ -5,6 +5,7 @@
 
 import { Request, Response } from 'express';
 import { HallService } from '../services/HallService';
+import RateService from '../services/RateService';
 import { successResponse, errorResponse } from '../utils/response';
 import { asyncHandler } from '../middleware/errorHandler';
 
@@ -62,6 +63,52 @@ export const getHallById = asyncHandler(async (req: Request, res: Response) => {
   }
 
   res.json(successResponse('Hall retrieved successfully', hall));
+});
+
+export const getHallRateSetup = asyncHandler(async (req: Request, res: Response) => {
+  const id = parseInt(req.params.id);
+  const setup = await RateService.getHallRateSetup(id);
+  res.json(successResponse('Hall rate setup retrieved successfully', setup));
+});
+
+export const updateHallSlotRates = asyncHandler(async (req: Request, res: Response) => {
+  const id = parseInt(req.params.id);
+  const prices = Array.isArray(req.body.slot_prices) ? req.body.slot_prices : [];
+  const setup = await RateService.upsertSlotPrices(id, prices);
+  res.json(successResponse('Hall slot rates updated successfully', setup));
+});
+
+export const createHallRateRule = asyncHandler(async (req: Request, res: Response) => {
+  const id = parseInt(req.params.id);
+  const ruleId = await RateService.createRule(id, req.body);
+  const setup = await RateService.getHallRateSetup(id);
+  res.status(201).json(successResponse('Hall rate rule created successfully', { rule_id: ruleId, setup }));
+});
+
+export const updateHallRateRule = asyncHandler(async (req: Request, res: Response) => {
+  const id = parseInt(req.params.id);
+  const ruleId = parseInt(req.params.ruleId);
+  await RateService.updateRule(id, ruleId, req.body);
+  const setup = await RateService.getHallRateSetup(id);
+  res.json(successResponse('Hall rate rule updated successfully', setup));
+});
+
+export const deleteHallRateRule = asyncHandler(async (req: Request, res: Response) => {
+  const id = parseInt(req.params.id);
+  const ruleId = parseInt(req.params.ruleId);
+  await RateService.deleteRule(id, ruleId);
+  res.json(successResponse('Hall rate rule deleted successfully'));
+});
+
+export const previewHallRate = asyncHandler(async (req: Request, res: Response) => {
+  const id = parseInt(req.params.id);
+  const preview = await RateService.preview({
+    hall_id: id,
+    event_date: req.body.event_date,
+    slot_type: req.body.slot_type,
+    package_id: req.body.package_id || null,
+  });
+  res.json(successResponse('Hall rate preview calculated successfully', preview));
 });
 
 /**

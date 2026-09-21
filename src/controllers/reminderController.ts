@@ -90,3 +90,27 @@ export const sendBulkReminders = asyncHandler(async (req: Request, res: Response
     data: result
   });
 });
+
+/**
+ * GET /api/reminders/preview/:bookingId
+ * Get reminder preview (Email HTML & WhatsApp text) for a specific booking
+ */
+export const getReminderPreview = asyncHandler(async (req: Request, res: Response) => {
+  const { bookingId } = req.params;
+  const id = parseInt(bookingId);
+
+  if (isNaN(id)) {
+    res.status(400).json({
+      success: false,
+      message: 'Invalid booking ID',
+    });
+    return;
+  }
+
+  const preview = await reminderService.getReminderPreview(id);
+
+  res.json({
+    success: true,
+    data: preview,
+  });
+});

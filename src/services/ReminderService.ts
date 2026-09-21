@@ -17,6 +17,7 @@ interface BookingWithBalance {
   hall_name: string;
   event_date: string;
   time_slot: string;
+  status?: string;
   total_amount: number;
   advance_amount: number;
   balance_amount: number;
@@ -56,6 +57,7 @@ export class ReminderService {
         h.name as hall_name,
         b.event_date,
         b.time_slot,
+        b.status,
         b.total_amount,
         b.advance_amount,
         (b.total_amount - b.advance_amount) as balance_amount,
@@ -112,35 +114,11 @@ export class ReminderService {
    * Send payment reminder for a specific booking
    */
   async sendPaymentReminder(bookingId: number): Promise<ReminderSendResult> {
-    const tenantId = getTenantId();
-    // Get booking details
-    const sql = `
-      SELECT 
-        b.id,
-        CONCAT('BK', LPAD(b.id, 6, '0')) as booking_id,
-        c.name as customer_name,
-        c.email as customer_email,
-        c.phone as customer_phone,
-        h.name as hall_name,
-        b.event_date,
-        b.time_slot,
-        b.total_amount,
-        b.advance_amount,
-        (b.total_amount - b.advance_amount) as balance_amount,
-        DATEDIFF(b.event_date, CURDATE()) as days_until_event
-      FROM bookings b
-      JOIN customers c ON b.customer_id = c.id AND c.tenant_id = b.tenant_id
-      JOIN halls h ON b.hall_id = h.id AND h.tenant_id = b.tenant_id
-      WHERE b.id = ? AND b.tenant_id = ?
-    `;
+    const booking = await this.getBookingWithBalance(bookingId);
 
-    const [rows] = await pool.execute<RowDataPacket[]>(sql, [bookingId, tenantId]);
-
-    if (rows.length === 0) {
-      throw new Error('Booking not found');
+    if (booking.status === 'cancelled') {
+      throw new Error('Payment reminders are disabled for cancelled bookings');
     }
-
-    const booking = rows[0] as BookingWithBalance;
 
     if (booking.balance_amount <= 0) {
       throw new Error('No pending balance for this booking');
@@ -247,4 +225,86 @@ export class ReminderService {
       console.log(`Reminder sent for booking ${bookingId} (${type})`);
     }
   }
+
+  /**
+   * Get booking with balance helper
+   */
+  private async getBookingWithBalance(bookingId: number): Promise<BookingWithBalance> {
+    const tenantId = getTenantId();
+    const sql = `
+      SELECT 
+        b.id,
+        CONCAT('BK', LPAD(b.id, 6, '0')) as booking_id,
+        c.name as customer_name,
+        c.email as customer_email,
+        c.phone as customer_phone,
+        h.name as hall_name,
+        b.event_date,
+        b.time_slot,
+        b.total_amount,
+        b.advance_amount,
+        (b.total_amount - b.advance_amount) as balance_amount,
+        DATEDIFF(b.event_date, CURDATE()) as days_until_event
+      FROM bookings b
+      JOIN customers c ON b.customer_id = c.id AND c.tenant_id = b.tenant_id
+      JOIN halls h ON b.hall_id = h.id AND h.tenant_id = b.tenant_id
+      WHERE b.id = ? AND b.tenant_id = ?
+    `;
+
+    const [rows] = await pool.execute<RowDataPacket[]>(sql, [bookingId, tenantId]);
+    if (rows.length === 0) {
+      throw new Error('Booking not found');
+    }
+    return rows[0] as BookingWithBalance;
+  }
+
+  /**
+   * Get reminder preview (Email HTML & WhatsApp text) for a specific booking
+   */
+  async getReminderPreview(bookingId: number) {
+    const booking = await this.getBookingWithBalance(bookingId);
+    const emailPreview = this.emailService.getPaymentReminderPreview({
+      customer_email: booking.customer_email,
+      customer_name: booking.customer_name,
+      booking_id: booking.booking_id,
+      hall_name: booking.hall_name,
+      event_date: booking.event_date,
+      time_slot: booking.time_slot,
+      total_amount: booking.total_amount,
+      advance_amount: booking.advance_amount,
+      balance_amount: booking.balance_amount,
+      days_until_event: booking.days_until_event,
+    });
+
+    const formattedDate = new Date(booking.event_date).toLocaleDateString('en-IN', {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+    });
+
+    const whatsappMessage = [
+      `Hello ${booking.customer_name || 'Customer'},`,
+      '',
+      `Gentle reminder for your venue booking ${booking.booking_id}.`,
+      '',
+      `Venue: ${booking.hall_name || 'Hall'}`,
+      `Event date: ${formattedDate}`,
+      `Time slot: ${booking.time_slot}`,
+      `Balance pending: ₹${Number(booking.balance_amount || 0).toLocaleString('en-IN')}`,
+      '',
+      'Please complete the pending payment before the event date. If you have already paid, please share the payment confirmation with the venue team.',
+      'Thank you.',
+    ].join('\n');
+
+    return {
+      booking_id: booking.booking_id,
+      customer_name: booking.customer_name,
+      customer_phone: booking.customer_phone,
+      customer_email: booking.customer_email,
+      balance_amount: booking.balance_amount,
+      email: emailPreview,
+      whatsappMessage,
+    };
+  }
 }
+

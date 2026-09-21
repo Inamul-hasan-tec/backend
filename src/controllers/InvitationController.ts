@@ -74,6 +74,20 @@ export class InvitationController {
     }
   }
 
+  async revoke(req: Request, res: Response): Promise<void> {
+    try {
+      if (!req.user?.id) return void res.status(401).json({ success: false, error: 'Unauthorized' });
+      const invitationId = Number(req.params.id);
+      if (!Number.isInteger(invitationId) || invitationId <= 0) {
+        return void res.status(400).json({ success: false, error: 'Invalid invitation ID' });
+      }
+      const result = await InvitationRepository.revoke(invitationId, req.user.id);
+      res.json({ success: true, data: result });
+    } catch (error) {
+      res.status(400).json({ success: false, error: error instanceof Error ? error.message : 'Failed to revoke invitation' });
+    }
+  }
+
   async listOwnerInvitations(req: Request, res: Response): Promise<void> {
     try {
       const tenantId = Number(req.params.id);
@@ -152,6 +166,30 @@ export class InvitationController {
       res.json({ success: true, data: { ...data, email_sent: emailSent } });
     } catch (error) {
       res.status(400).json({ success: false, error: error instanceof Error ? error.message : 'Failed to resend owner invitation' });
+    }
+  }
+
+  async revokeOwnerInvitation(req: Request, res: Response): Promise<void> {
+    try {
+      if (!req.user?.id) return void res.status(401).json({ success: false, error: 'Unauthorized' });
+      const tenantId = Number(req.params.id);
+      const invitationId = Number(req.params.invitationId);
+      if (!Number.isInteger(tenantId) || !Number.isInteger(invitationId)) {
+        return void res.status(400).json({ success: false, error: 'Invalid tenant or invitation ID' });
+      }
+      const result = await InvitationRepository.revokeForTenant(tenantId, invitationId, req.user.id);
+      await AuditRepository.recordPlatform({
+        actorUserId: req.user.id,
+        action: 'tenant.owner_invitation_revoked',
+        targetType: 'tenant',
+        targetId: String(tenantId),
+        metadata: { invitation_id: invitationId },
+        requestId: req.requestId,
+        ipAddress: req.ip,
+      });
+      res.json({ success: true, data: result });
+    } catch (error) {
+      res.status(400).json({ success: false, error: error instanceof Error ? error.message : 'Failed to revoke owner invitation' });
     }
   }
 

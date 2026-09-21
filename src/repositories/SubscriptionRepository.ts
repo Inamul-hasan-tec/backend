@@ -5,7 +5,7 @@ export class SubscriptionRepository {
   async getPlans() {
     const [rows] = await pool.query<RowDataPacket[]>(
       `SELECT code, name, monthly_price, annual_price, hall_limit, user_limit,
-              booking_limit, storage_gb, features
+              booking_limit, storage_gb, inventory_photo_limit, features
        FROM subscription_plans
        WHERE is_active = TRUE
        ORDER BY monthly_price`
@@ -16,7 +16,7 @@ export class SubscriptionRepository {
   async getPlan(planCode: string) {
     const [rows] = await pool.query<RowDataPacket[]>(
       `SELECT code, name, monthly_price, annual_price, hall_limit, user_limit,
-              booking_limit, storage_gb, features
+              booking_limit, storage_gb, inventory_photo_limit, features
        FROM subscription_plans
        WHERE code = ? AND is_active = TRUE
        LIMIT 1`,
@@ -28,7 +28,7 @@ export class SubscriptionRepository {
   async getTenantSubscription(tenantId: number) {
     const [rows] = await pool.query<RowDataPacket[]>(
       `SELECT s.*, p.name AS plan_name, p.hall_limit, p.user_limit,
-              p.booking_limit, p.storage_gb, p.features
+              p.booking_limit, p.storage_gb, p.inventory_photo_limit, p.features
        FROM subscriptions s
        LEFT JOIN subscription_plans p ON p.code = s.plan
        WHERE s.tenant_id = ?

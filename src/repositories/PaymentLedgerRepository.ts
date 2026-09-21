@@ -307,6 +307,17 @@ export async function allocatePaymentToInvoices(
 ): Promise<void> {
   for (const allocation of allocations) {
     const amount = validatePositiveMoney(Number(allocation.amount), 'Allocation amount');
+    const [invRows] = await connection.execute<RowDataPacket[]>(
+      `SELECT id, status, invoice_number FROM invoices WHERE id = ? AND tenant_id = ?`,
+      [allocation.invoice_id, tenantId]
+    );
+    if (!invRows[0]) {
+      throw new Error('Invoice not found');
+    }
+    if (['cancelled', 'void'].includes(invRows[0].status)) {
+      throw new Error(`Cannot record payment against ${invRows[0].status} invoice ${invRows[0].invoice_number}`);
+    }
+
     await connection.execute(
       `INSERT INTO invoice_payment_allocations (
         tenant_id, invoice_id, payment_id, amount
@@ -316,25 +327,21 @@ export async function allocatePaymentToInvoices(
     await connection.execute(
       `UPDATE invoices
        SET amount_paid = ROUND(amount_paid + ?, 2),
-           balance_amount = ROUND(balance_amount - ?, 2),
+           balance_amount = GREATEST(ROUND(grand_total - amount_paid, 2), 0),
            payment_status = CASE
-             WHEN ROUND(balance_amount - ?, 2) <= 0 THEN 'paid'
-             WHEN ROUND(amount_paid + ?, 2) > 0 THEN 'partial'
+             WHEN amount_paid >= grand_total THEN 'paid'
+             WHEN amount_paid > 0 THEN 'partial'
              ELSE 'unpaid'
            END,
            status = CASE
-             WHEN ROUND(balance_amount - ?, 2) <= 0 THEN 'paid'
-             WHEN ROUND(amount_paid + ?, 2) > 0 THEN 'partially_paid'
+             WHEN status IN ('cancelled', 'void') THEN status
+             WHEN amount_paid >= grand_total THEN 'paid'
+             WHEN amount_paid > 0 THEN 'partially_paid'
              ELSE status
            END,
            updated_at = NOW()
        WHERE id = ? AND tenant_id = ?`,
       [
-        amount,
-        amount,
-        amount,
-        amount,
-        amount,
         amount,
         allocation.invoice_id,
         tenantId,
@@ -386,11 +393,14 @@ export async function allocateExistingBookingPaymentsToInvoice(
 ): Promise<void> {
   let remainingInvoiceBalance = roundMoney(invoiceBalance);
   const [paymentRows] = await connection.execute<RowDataPacket[]>(
-    `SELECT p.id, p.amount, COALESCE(SUM(ipa.amount), 0) AS allocated_amount
+    `SELECT p.id, p.amount, COALESCE(SUM(CASE WHEN i.id IS NOT NULL AND i.status NOT IN ('cancelled', 'void') THEN ipa.amount ELSE 0 END), 0) AS allocated_amount
      FROM payments p
      LEFT JOIN invoice_payment_allocations ipa
        ON ipa.payment_id = p.id
       AND ipa.tenant_id = p.tenant_id
+     LEFT JOIN invoices i
+       ON i.id = ipa.invoice_id
+      AND i.tenant_id = ipa.tenant_id
      WHERE p.tenant_id = ?
        AND p.booking_id = ?
        AND ${ACTIVE_PAYMENT_STATUS_SQL.replace(/status/g, 'p.status')}
@@ -414,5 +424,72 @@ export async function allocateExistingBookingPaymentsToInvoice(
       { invoice_id: invoiceId, amount: allocationAmount },
     ]);
     remainingInvoiceBalance = roundMoney(remainingInvoiceBalance - allocationAmount);
+  }
+}
+
+export async function syncBookingInvoiceBalances(
+  connection: PoolConnection,
+  tenantId: number,
+  bookingId: number
+): Promise<void> {
+  const [invoices] = await connection.execute<RowDataPacket[]>(
+    `SELECT id, grand_total, status
+     FROM invoices
+     WHERE tenant_id = ?
+       AND booking_id = ?
+       AND status NOT IN ('cancelled', 'void')
+     ORDER BY invoice_date ASC, id ASC
+     FOR UPDATE`,
+    [tenantId, bookingId]
+  );
+
+  if (invoices.length === 0) return;
+
+  const invoiceIds = invoices.map((inv) => Number(inv.id));
+  const placeholders = invoiceIds.map(() => '?').join(', ');
+  await connection.execute(
+    `DELETE FROM invoice_payment_allocations
+     WHERE tenant_id = ? AND invoice_id IN (${placeholders})`,
+    [tenantId, ...invoiceIds]
+  );
+
+  for (const inv of invoices) {
+    await connection.execute(
+      `UPDATE invoices
+       SET amount_paid = 0,
+           balance_amount = grand_total,
+           payment_status = 'unpaid',
+           status = CASE WHEN status IN ('paid', 'partially_paid') THEN 'issued' ELSE status END,
+           updated_at = NOW()
+       WHERE id = ? AND tenant_id = ?`,
+      [inv.id, tenantId]
+    );
+  }
+
+  for (const inv of invoices) {
+    await allocateExistingBookingPaymentsToInvoice(
+      connection,
+      tenantId,
+      bookingId,
+      Number(inv.id),
+      Number(inv.grand_total)
+    );
+  }
+}
+
+export async function syncAllBookingInvoiceBalances(
+  connection: PoolConnection,
+  tenantId: number
+): Promise<void> {
+  const [bookingRows] = await connection.execute<RowDataPacket[]>(
+    `SELECT DISTINCT booking_id
+     FROM invoices
+     WHERE tenant_id = ? AND booking_id IS NOT NULL AND status NOT IN ('cancelled', 'void')`,
+    [tenantId]
+  );
+  for (const row of bookingRows) {
+    if (row.booking_id) {
+      await syncBookingInvoiceBalances(connection, tenantId, Number(row.booking_id));
+    }
   }
 }

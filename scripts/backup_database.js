@@ -131,6 +131,7 @@ async function main() {
     '--triggers',
     '--events',
     '--set-gtid-purged=OFF',
+    '--no-tablespaces',
   ];
 
   for (const view of views) {

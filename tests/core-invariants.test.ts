@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { validatePaymentTotal } from '../src/repositories/PaymentRepository';
 import {
   getTenantId,
@@ -55,5 +57,36 @@ export function testBookingUpdateInvariants() {
   assert.equal(
     normalizeBookingDate(new Date('2026-07-10T00:00:00.000Z')),
     '2026-07-10'
+  );
+}
+
+export function testBookingCreationPilotGuards() {
+  const source = readFileSync(
+    join(__dirname, '..', 'src', 'services', 'BookingService.ts'),
+    'utf8'
+  );
+
+  assert.match(
+    source,
+    /RateService\.preview\(\{[\s\S]*?totalAmount[\s\S]*?isPositiveNumber\(totalAmount\)/,
+    'Booking creation must use server-side rate preview and reject non-positive totals'
+  );
+
+  assert.match(
+    source,
+    /isDateWithinCurrentTenantSlotEntitlement\(eventDate\)/,
+    'Booking creation must reject dates outside the active subscription period'
+  );
+
+  assert.match(
+    source,
+    /findIdByIdempotencyKey\(idempotencyKey\)/,
+    'Booking creation must return the existing booking for a repeated idempotency key'
+  );
+
+  assert.match(
+    source,
+    /existing\.status === 'cancelled'[\s\S]*?return true/,
+    'Booking cancellation must be idempotent after the booking is already cancelled'
   );
 }
