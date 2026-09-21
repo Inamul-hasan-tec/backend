@@ -16,7 +16,7 @@ const upload = multer({
   limits: { fileSize: 1024 * 1024 },
 });
 
-router.get('/', getCalendarInsights);
+router.get('/', requirePermission(Permission.BOOKING_LIST), getCalendarInsights);
 router.get(
   '/preferences',
   requirePermission(Permission.SETTINGS_VIEW),

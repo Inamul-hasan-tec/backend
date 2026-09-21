@@ -32,6 +32,21 @@ router.get('/:id',
   hallController.getHallById
 );
 
+router.get('/:id/rates',
+  requirePermission(Permission.HALL_VIEW),
+  hallController.getHallRateSetup
+);
+
+router.post('/:id/rates/preview',
+  requirePermission(Permission.HALL_VIEW),
+  hallController.previewHallRate
+);
+
+router.post('/:id/rate-preview',
+  requirePermission(Permission.HALL_VIEW),
+  hallController.previewHallRate
+);
+
 router.get('/:id/availability', 
   requirePermission(Permission.HALL_VIEW),
   hallController.checkHallAvailability
@@ -52,6 +67,26 @@ router.post('/',
 router.put('/:id', 
   requirePermission(Permission.HALL_UPDATE),
   hallController.updateHall
+);
+
+router.put('/:id/rates/slots',
+  requirePermission(Permission.HALL_UPDATE),
+  hallController.updateHallSlotRates
+);
+
+router.post('/:id/rates/rules',
+  requirePermission(Permission.HALL_UPDATE),
+  hallController.createHallRateRule
+);
+
+router.put('/:id/rates/rules/:ruleId',
+  requirePermission(Permission.HALL_UPDATE),
+  hallController.updateHallRateRule
+);
+
+router.delete('/:id/rates/rules/:ruleId',
+  requirePermission(Permission.HALL_UPDATE),
+  hallController.deleteHallRateRule
 );
 
 // DELETE routes - Require DELETE permission

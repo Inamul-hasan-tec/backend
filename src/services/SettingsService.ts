@@ -63,6 +63,21 @@ interface SubmitPaymentData {
   payment_proof: Express.Multer.File;
 }
 
+interface UpdateOperationSettingsData {
+  operations_profile?: 'simple' | 'standard' | 'full' | 'custom';
+  enable_event_readiness?: boolean;
+  include_inventory_in_readiness?: boolean;
+  include_staff_in_readiness?: boolean;
+  include_payment_in_readiness?: boolean;
+  include_invoice_in_readiness?: boolean;
+  employee_mode?: 'off' | 'simple' | 'event_staffing' | 'advanced';
+  enable_employee_attendance?: boolean;
+  enable_employee_conflict_warnings?: boolean;
+  require_staff_for_event_closeout?: boolean;
+  enable_vendor_payout_tracking?: boolean;
+  enable_weekly_roster?: boolean;
+}
+
 export class SettingsService {
   private settingsRepository: SettingsRepository;
   private cloudinaryService: CloudinaryService;
@@ -218,6 +233,28 @@ export class SettingsService {
     }
 
     await this.settingsRepository.deleteUser(memberId);
+  }
+
+  // ============================================
+  // Operations Settings
+  // ============================================
+  async getOperationSettings() {
+    const tenantId = getTenantId();
+    return await this.settingsRepository.getOperationSettings(tenantId);
+  }
+
+  async updateOperationSettings(data: UpdateOperationSettingsData) {
+    const tenantId = getTenantId();
+    const allowedModes = ['off', 'simple', 'event_staffing', 'advanced'];
+    const allowedProfiles = ['simple', 'standard', 'full', 'custom'];
+    if (data.operations_profile && !allowedProfiles.includes(data.operations_profile)) {
+      throw new Error('Invalid operations profile');
+    }
+    if (data.employee_mode && !allowedModes.includes(data.employee_mode)) {
+      throw new Error('Invalid employee management mode');
+    }
+
+    return await this.settingsRepository.updateOperationSettings(tenantId, data);
   }
 
   // ============================================

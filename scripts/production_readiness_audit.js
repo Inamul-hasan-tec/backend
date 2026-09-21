@@ -176,6 +176,13 @@ async function main() {
          UNION ALL SELECT '317_calendar_insights.sql'
          UNION ALL SELECT '318_owner_activity_notifications.sql'
          UNION ALL SELECT '319_tenant_calendar_slot_mode.sql'
+         UNION ALL SELECT '320_event_inventory_operations.sql'
+         UNION ALL SELECT '321_inventory_master_strengthening_guards.sql'
+         UNION ALL SELECT '322_employee_management.sql'
+         UNION ALL SELECT '323_operation_settings.sql'
+         UNION ALL SELECT '324_operation_readiness_flexibility.sql'
+         UNION ALL SELECT '325_slot_calendar_query_indexes.sql'
+         UNION ALL SELECT '326_rate_studio.sql'
        ) expected
        LEFT JOIN schema_migrations sm ON sm.migration_name = expected.migration_name
        WHERE sm.migration_name IS NULL`
@@ -236,7 +243,7 @@ async function main() {
     );
 
     const [tenantAdminRows] = await connection.query(
-      `SELECT COUNT(DISTINCT tenant_id) AS tenant_count
+      `SELECT COUNT(DISTINCT ut.tenant_id) AS tenant_count
        FROM user_tenants ut
        INNER JOIN users u ON u.id = ut.user_id
        WHERE ut.role = 'admin'

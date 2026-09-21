@@ -37,6 +37,11 @@ router.get('/stats',
   bookingController.getBookingStats
 );
 
+router.get('/:id/readiness',
+  requirePermission(Permission.OPERATIONS_VIEW),
+  bookingController.getBookingReadiness
+);
+
 router.get('/:id', 
   requirePermission(Permission.BOOKING_VIEW),
   bookingController.getBookingById

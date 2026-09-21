@@ -24,6 +24,16 @@ const normalizeTenantSettings = (settings: Record<string, string>) => ({
   ...settings,
 });
 
+const normalizeSlug = (value: string) =>
+  String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .replace(/-{2,}/g, '-');
+
+const isValidSlug = (value: string) => /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(value);
+
 export class TenantController {
   /**
    * Get current tenant info
@@ -173,23 +183,24 @@ export class TenantController {
     try {
       const { name, slug, subdomain, domain, logo_url } = req.body;
       const tenantDomain = domain || subdomain;
+      const normalizedSlug = normalizeSlug(slug || name);
 
       // Validate required fields
-      if (!name || !slug) {
+      if (!name || !normalizedSlug) {
         return res.status(400).json({ 
           success: false,
           error: 'Name and slug are required' 
         });
       }
-      if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)) {
+      if (!isValidSlug(normalizedSlug)) {
         return res.status(400).json({
           success: false,
-          error: 'Slug must contain lowercase letters, numbers, and hyphens only',
+          error: 'Slug can only use lowercase letters, numbers, and single hyphens. Example: royal-palace-hall.',
         });
       }
 
       // Check if slug already exists
-      const existing = await TenantRepository.findBySlug(slug);
+      const existing = await TenantRepository.findBySlug(normalizedSlug);
       if (existing) {
         return res.status(409).json({ 
           success: false,
@@ -211,7 +222,7 @@ export class TenantController {
       // Create tenant
       const tenantId = await TenantRepository.create({
         name,
-        slug,
+        slug: normalizedSlug,
         subdomain: tenantDomain,
         logo_url,
       });
@@ -220,7 +231,7 @@ export class TenantController {
         action: 'tenant.created',
         targetType: 'tenant',
         targetId: String(tenantId),
-        metadata: { name, slug, domain: tenantDomain, logo_url },
+        metadata: { name, slug: normalizedSlug, domain: tenantDomain, logo_url },
         requestId: req.requestId,
         ipAddress: req.ip,
       });
@@ -247,6 +258,7 @@ export class TenantController {
       const tenantId = parseInt(req.params.id);
       const { name, slug, subdomain, domain, logo_url, status } = req.body;
       const tenantDomain = domain || subdomain;
+      const normalizedSlug = slug !== undefined ? normalizeSlug(slug || name || '') : undefined;
       const allowedStatuses = [
         'trial',
         'active',
@@ -262,10 +274,10 @@ export class TenantController {
           error: 'Invalid tenant status',
         });
       }
-      if (slug && !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)) {
+      if (slug !== undefined && (!normalizedSlug || !isValidSlug(normalizedSlug))) {
         return res.status(400).json({
           success: false,
-          error: 'Slug must contain lowercase letters, numbers, and hyphens only',
+          error: 'Slug can only use lowercase letters, numbers, and single hyphens. Example: royal-palace-hall.',
         });
       }
 
@@ -279,8 +291,8 @@ export class TenantController {
       }
 
       // Check if slug is being changed and already exists
-      if (slug && slug !== tenant.slug) {
-        const existing = await TenantRepository.findBySlug(slug);
+      if (normalizedSlug && normalizedSlug !== tenant.slug) {
+        const existing = await TenantRepository.findBySlug(normalizedSlug);
         if (existing) {
           return res.status(409).json({ 
             success: false,
@@ -302,7 +314,7 @@ export class TenantController {
 
       await TenantRepository.updateById(tenantId, {
         name,
-        slug,
+        slug: normalizedSlug,
         subdomain: tenantDomain,
         logo_url,
         status,
@@ -314,7 +326,7 @@ export class TenantController {
         targetId: String(tenantId),
         metadata: {
           previous: { name: tenant.name, slug: tenant.slug, status: tenant.status },
-          updated: { name, slug, domain: tenantDomain, logo_url, status },
+          updated: { name, slug: normalizedSlug, domain: tenantDomain, logo_url, status },
         },
         requestId: req.requestId,
         ipAddress: req.ip,

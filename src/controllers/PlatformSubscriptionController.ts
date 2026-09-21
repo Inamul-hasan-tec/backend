@@ -41,8 +41,11 @@ export class PlatformSubscriptionController {
         : null;
       res.json({
         success: true,
-        message: 'Subscription payment approved',
-        data: { slot_generation: slotGeneration },
+        message: 'Subscription payment approved and availability extended',
+        data: {
+          approval,
+          slot_generation: slotGeneration,
+        },
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Approval failed';

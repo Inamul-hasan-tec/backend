@@ -115,7 +115,15 @@ export class InvoiceEmailService {
     });
   }
 
-  private buildInvoiceEmail(invoice: CompleteInvoice): string {
+  getInvoiceEmailPreview(invoice: CompleteInvoice): { subject: string; to: string; html: string } {
+    return {
+      subject: `Invoice ${invoice.invoice_number} from ${invoice.business_name}`,
+      to: invoice.customer_email || '',
+      html: this.buildInvoiceEmail(invoice),
+    };
+  }
+
+  buildInvoiceEmail(invoice: CompleteInvoice): string {
     const balanceDue = Number(invoice.balance_amount || 0);
     const paidInFull = balanceDue <= 0;
     const statusLabel = paidInFull ? 'Payment complete' : 'Balance pending';

@@ -5,28 +5,82 @@ const dotenv = require('dotenv');
 
 dotenv.config({ path: path.join(__dirname, '../.env') });
 
-const migrationFiles = [
-  '300_platform_tenant_lifecycle.sql',
-  '301_subscription_billing.sql',
-  '302_booking_payment_integrity.sql',
-  '303_full_day_slots.sql',
-  '304_invoice_integrity.sql',
-  '305_invoice_payment_allocations.sql',
-  '306_booking_payment_mode.sql',
-  '307_subscription_collations.sql',
-  '308_auth_session_revocation.sql',
-  '309_invitations_subscription_policy.sql',
-  '310_user_phone.sql',
-  '311_tenant_upi_settings.sql',
-  '312_tenant_schema_drift_guards.sql',
-  '313_hall_scoped_packages.sql',
-  '314_discount_template_tenant_scope.sql',
-  '315_payment_machine.sql',
-  '316_hall_gallery.sql',
-  '317_calendar_insights.sql',
-  '318_owner_activity_notifications.sql',
-  '319_tenant_calendar_slot_mode.sql',
-];
+/**
+ * Dynamically discover and sort all migration files in migrations/ directory
+ */
+function getMigrationFiles() {
+  const migrationsDir = path.join(__dirname, '../migrations');
+  if (!fs.existsSync(migrationsDir)) {
+    throw new Error(`Migrations directory not found at: ${migrationsDir}`);
+  }
+
+  const files = fs.readdirSync(migrationsDir);
+  
+  // Filter for platform SQL migration files starting with 3xx (e.g. 300_xxx.sql, 322_xxx.sql)
+  const sqlFiles = files.filter(f => f.endsWith('.sql') && /^3\d{2}_/.test(f));
+
+  // Sort numerically by prefix number (e.g. 300 < 301 < ... < 320)
+  sqlFiles.sort((a, b) => {
+    const numA = parseInt(a.split('_')[0], 10) || 0;
+    const numB = parseInt(b.split('_')[0], 10) || 0;
+    if (numA !== numB) return numA - numB;
+    return a.localeCompare(b);
+  });
+
+  return sqlFiles;
+}
+
+function splitSqlStatements(sql) {
+  // Remove multi-line comments /* ... */
+  let cleanedSql = sql.replace(/\/\*[\s\S]*?\*\//g, '');
+
+  // Remove single-line comments (-- ...)
+  const lines = cleanedSql
+    .split('\n')
+    .map((line) => {
+      const trimmed = line.trim();
+      if (trimmed.startsWith('--')) return '';
+      // Remove inline trailing comment if present and not inside string
+      const commentIdx = line.indexOf('--');
+      if (commentIdx !== -1) {
+        // Simple check if -- is preceded by space or start
+        return line.substring(0, commentIdx);
+      }
+      return line;
+    });
+  cleanedSql = lines.join('\n');
+
+  const statements = [];
+  let current = '';
+  let inString = false;
+  let stringChar = '';
+
+  for (let i = 0; i < cleanedSql.length; i++) {
+    const char = cleanedSql[i];
+    if (!inString && (char === "'" || char === '"' || char === '`')) {
+      inString = true;
+      stringChar = char;
+      current += char;
+    } else if (inString && char === stringChar && cleanedSql[i - 1] !== '\\') {
+      inString = false;
+      stringChar = '';
+      current += char;
+    } else if (!inString && char === ';') {
+      const trimmed = current.trim();
+      if (trimmed) {
+        statements.push(trimmed);
+      }
+      current = '';
+    } else {
+      current += char;
+    }
+  }
+  const trimmed = current.trim();
+  if (trimmed) {
+    statements.push(trimmed);
+  }
+  return statements;
+}
 
 async function run() {
   const looksProduction =
@@ -75,35 +129,52 @@ async function run() {
       )
     `);
 
+    const migrationFiles = getMigrationFiles();
+    console.log(`Discovered ${migrationFiles.length} migration file(s) in migrations directory.`);
+
+    let executedCount = 0;
+    let skippedCount = 0;
+
     for (const migrationFile of migrationFiles) {
       const [rows] = await connection.query(
         'SELECT migration_name FROM schema_migrations WHERE migration_name = ?',
         [migrationFile]
       );
       if (rows.length > 0) {
-        console.log(`Skipping ${migrationFile}`);
+        skippedCount++;
         continue;
       }
 
-      const sql = fs.readFileSync(
-        path.join(__dirname, '../migrations', migrationFile),
-        'utf8'
-      );
-      console.log(`Running ${migrationFile}`);
-      await connection.query(sql);
+      const sqlPath = path.join(__dirname, '../migrations', migrationFile);
+      const sql = fs.readFileSync(sqlPath, 'utf8');
+      console.log(`🚀 Running migration: ${migrationFile}`);
+
+      const statements = splitSqlStatements(sql);
+      for (const statement of statements) {
+        if (!statement || statement.startsWith('--')) continue;
+        try {
+          await connection.query(statement);
+        } catch (stmtErr) {
+          if (!stmtErr.message.includes('already exists') && !stmtErr.message.includes('Duplicate')) {
+            throw stmtErr;
+          }
+        }
+      }
+
       await connection.query(
         'INSERT INTO schema_migrations (migration_name) VALUES (?)',
         [migrationFile]
       );
+      executedCount++;
     }
 
-    console.log('Platform migrations completed');
+    console.log(`✅ Platform migrations completed: ${executedCount} executed, ${skippedCount} skipped.`);
   } finally {
     await connection.end();
   }
 }
 
 run().catch((error) => {
-  console.error('Platform migration failed:', error.message);
+  console.error('❌ Platform migration failed:', error.message);
   process.exitCode = 1;
 });

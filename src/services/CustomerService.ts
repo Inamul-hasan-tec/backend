@@ -92,12 +92,51 @@ export class CustomerService {
   }
 
   /**
-   * Delete customer
+   * Get customer dependencies (bookings, payments, invoices, balances)
    */
-  async deleteCustomer(id: number): Promise<boolean> {
+  async getCustomerDependencies(id: number) {
     const existing = await this.customerRepo.findById(id);
     if (!existing) {
       throw new Error('Customer not found');
+    }
+    return await this.customerRepo.getCustomerDependencies(id);
+  }
+
+  /**
+   * Archive customer
+   */
+  async archiveCustomer(id: number, reason: string, actorId: number): Promise<boolean> {
+    const existing = await this.customerRepo.findById(id);
+    if (!existing) {
+      throw new Error('Customer not found');
+    }
+    return await this.customerRepo.archiveCustomer(id, reason, actorId);
+  }
+
+  /**
+   * Delete customer permanently (Owner only, 0 dependencies)
+   */
+  async deleteCustomer(id: number, isOwner: boolean = false): Promise<boolean> {
+    const existing = await this.customerRepo.findById(id);
+    if (!existing) {
+      throw new Error('Customer not found');
+    }
+
+    if (!isOwner) {
+      throw new Error('Only venue owners can permanently delete customer records.');
+    }
+
+    const dependencies = await this.customerRepo.getCustomerDependencies(id);
+    const totalDependencies =
+      dependencies.active_bookings +
+      dependencies.cancelled_bookings +
+      dependencies.payments_count +
+      dependencies.invoices_count;
+
+    if (totalDependencies > 0) {
+      throw new Error(
+        'Cannot permanently delete customer with operational or financial history (bookings, payments, or invoices). Please archive the customer instead to preserve historical records.'
+      );
     }
 
     return await this.customerRepo.delete(id);

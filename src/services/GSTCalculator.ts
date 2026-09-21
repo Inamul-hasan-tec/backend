@@ -3,6 +3,9 @@
  * Handles all GST-related calculations for invoices
  */
 
+export type TaxMode = 'inclusive' | 'exclusive' | 'exempt' | 'no_gst';
+export type TaxTreatment = 'taxable' | 'exempt' | 'nil_rated' | 'non_gst';
+
 export interface LineItem {
   description: string;
   quantity: number;
@@ -10,9 +13,11 @@ export interface LineItem {
   discount_amount?: number;
   gst_rate: number;
   sac_hsn: string;
+  tax_treatment?: TaxTreatment;
 }
 
 export interface GSTCalculationResult {
+  tax_mode: TaxMode;
   subtotal: number;
   discount_amount: number;
   taxable_amount: number;
@@ -30,6 +35,7 @@ export interface GSTCalculationResult {
 export interface CalculatedLineItem extends LineItem {
   line_subtotal: number;
   taxable_value: number;
+  tax_treatment?: TaxTreatment;
   cgst_rate: number;
   sgst_rate: number;
   igst_rate: number;
@@ -48,13 +54,16 @@ export class GSTCalculator {
    * @param businessStateCode - Business state code (e.g., '29' for Karnataka)
    * @param customerStateCode - Customer state code
    * @param roundOffEnabled - Whether to apply round-off
+   * @param invoiceDiscountAmount - Global discount amount on invoice
+   * @param taxMode - 'inclusive' | 'exclusive' | 'exempt' | 'no_gst'
    */
   static calculateGST(
     lineItems: LineItem[],
     businessStateCode: string,
     customerStateCode: string,
     roundOffEnabled: boolean = true,
-    invoiceDiscountAmount: number = 0
+    invoiceDiscountAmount: number = 0,
+    taxMode: TaxMode = 'exclusive'
   ): GSTCalculationResult {
     if (!Array.isArray(lineItems) || lineItems.length === 0) {
       throw new Error('At least one invoice line item is required');
@@ -75,17 +84,17 @@ export class GSTCalculator {
       throw new Error('Invoice discount must be a non-negative number');
     }
 
-    const taxableBeforeInvoiceDiscount = lineItems.reduce((sum, item) => {
+    const totalBeforeInvoiceDiscount = lineItems.reduce((sum, item) => {
       return sum + item.quantity * item.unit_price - (item.discount_amount || 0);
     }, 0);
-    if (invoiceDiscountAmount > taxableBeforeInvoiceDiscount) {
+    if (invoiceDiscountAmount > totalBeforeInvoiceDiscount) {
       throw new Error('Invoice discount cannot exceed the taxable amount');
     }
 
     const discountedLineItems = this.allocateInvoiceDiscount(
       lineItems,
       invoiceDiscountAmount,
-      taxableBeforeInvoiceDiscount
+      totalBeforeInvoiceDiscount
     );
 
     // Determine supply type
@@ -96,7 +105,7 @@ export class GSTCalculator {
 
     // Calculate each line item
     const calculatedLineItems: CalculatedLineItem[] = discountedLineItems.map((item) => {
-      return this.calculateLineItem(item, supplyType);
+      return this.calculateLineItem(item, supplyType, taxMode);
     });
 
     // Sum up all amounts
@@ -122,6 +131,7 @@ export class GSTCalculator {
     }
 
     return {
+      tax_mode: taxMode,
       subtotal: this.roundTo2Decimals(subtotal),
       discount_amount: this.roundTo2Decimals(discount_amount),
       taxable_amount: this.roundTo2Decimals(taxable_amount),
@@ -198,46 +208,72 @@ export class GSTCalculator {
    */
   private static calculateLineItem(
     item: LineItem,
-    supplyType: 'intrastate' | 'interstate'
+    supplyType: 'intrastate' | 'interstate',
+    taxMode: TaxMode = 'exclusive'
   ): CalculatedLineItem {
     // Calculate line subtotal
     const line_subtotal = item.quantity * item.unit_price;
-
-    // Apply discount
     const discount = item.discount_amount || 0;
-    const taxable_value = line_subtotal - discount;
 
-    // Calculate GST based on supply type
+    const isExemptOrNonGst =
+      taxMode === 'exempt' ||
+      taxMode === 'no_gst' ||
+      item.tax_treatment === 'exempt' ||
+      item.tax_treatment === 'nil_rated' ||
+      item.tax_treatment === 'non_gst';
+
+    const effectiveGstRate = isExemptOrNonGst ? 0 : item.gst_rate;
+    const cess_amount = 0;
+
+    let taxable_value = 0;
     let cgst_rate = 0;
     let sgst_rate = 0;
     let igst_rate = 0;
     let cgst_amount = 0;
     let sgst_amount = 0;
     let igst_amount = 0;
+    let total_tax = 0;
+    let total_amount = 0;
 
-    if (supplyType === 'intrastate') {
-      // Intrastate: CGST + SGST (split GST rate equally)
-      cgst_rate = item.gst_rate / 2;
-      sgst_rate = item.gst_rate / 2;
-      cgst_amount = (taxable_value * cgst_rate) / 100;
-      sgst_amount = (taxable_value * sgst_rate) / 100;
+    if (effectiveGstRate === 0) {
+      taxable_value = line_subtotal - discount;
+      total_tax = 0;
+      total_amount = taxable_value;
+    } else if (taxMode === 'inclusive') {
+      const netInclusive = line_subtotal - discount;
+      taxable_value = Math.round((netInclusive / (1 + effectiveGstRate / 100)) * 100) / 100;
+      total_tax = this.roundTo2Decimals(netInclusive - taxable_value);
+
+      if (supplyType === 'intrastate') {
+        cgst_rate = effectiveGstRate / 2;
+        sgst_rate = effectiveGstRate / 2;
+        cgst_amount = this.roundTo2Decimals(total_tax / 2);
+        sgst_amount = this.roundTo2Decimals(total_tax - cgst_amount);
+      } else {
+        igst_rate = effectiveGstRate;
+        igst_amount = total_tax;
+      }
+      total_amount = netInclusive;
     } else {
-      // Interstate: IGST (full GST rate)
-      igst_rate = item.gst_rate;
-      igst_amount = (taxable_value * igst_rate) / 100;
+      // Exclusive mode
+      taxable_value = line_subtotal - discount;
+      if (supplyType === 'intrastate') {
+        cgst_rate = effectiveGstRate / 2;
+        sgst_rate = effectiveGstRate / 2;
+        cgst_amount = this.roundTo2Decimals((taxable_value * cgst_rate) / 100);
+        sgst_amount = this.roundTo2Decimals((taxable_value * sgst_rate) / 100);
+        total_tax = this.roundTo2Decimals(cgst_amount + sgst_amount);
+      } else {
+        igst_rate = effectiveGstRate;
+        igst_amount = this.roundTo2Decimals((taxable_value * igst_rate) / 100);
+        total_tax = igst_amount;
+      }
+      total_amount = this.roundTo2Decimals(taxable_value + total_tax);
     }
-
-    // Cess (if applicable) - currently 0 for most services
-    const cess_amount = 0;
-
-    // Total tax for this line
-    const total_tax = cgst_amount + sgst_amount + igst_amount + cess_amount;
-
-    // Total amount including tax
-    const total_amount = taxable_value + total_tax;
 
     return {
       ...item,
+      tax_treatment: item.tax_treatment || (isExemptOrNonGst ? (item.tax_treatment || 'exempt') : 'taxable'),
       line_subtotal: this.roundTo2Decimals(line_subtotal),
       taxable_value: this.roundTo2Decimals(taxable_value),
       cgst_rate: this.roundTo2Decimals(cgst_rate),

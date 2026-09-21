@@ -124,6 +124,33 @@ export class InvitationRepository {
     });
   }
 
+  async revoke(invitationId: number, revokedBy: number) {
+    return this.revokeForTenant(getTenantId(), invitationId, revokedBy);
+  }
+
+  async revokeForTenant(tenantId: number, invitationId: number, revokedBy: number) {
+    const [rows] = await pool.query<RowDataPacket[]>(
+      `SELECT id, email, role, name
+       FROM user_invitations
+       WHERE id = ? AND tenant_id = ? AND accepted_at IS NULL AND revoked_at IS NULL`,
+      [invitationId, tenantId]
+    );
+    if (!rows.length) {
+      throw new Error('Invitation not found or already processed');
+    }
+    await pool.query(
+      'UPDATE user_invitations SET revoked_at = NOW() WHERE id = ? AND tenant_id = ?',
+      [invitationId, tenantId]
+    );
+    await pool.query(
+      `INSERT INTO audit_logs
+       (tenant_id, user_id, action, entity_type, entity_id, new_values)
+       VALUES (?, ?, 'user.invitation_revoked', 'user_invitation', ?, ?)`,
+      [tenantId, revokedBy, invitationId, JSON.stringify({ email: rows[0].email, role: rows[0].role })]
+    );
+    return { id: invitationId, email: rows[0].email, revoked: true };
+  }
+
   async inspect(token: string) {
     const [rows] = await pool.query<RowDataPacket[]>(
       `SELECT ui.id, ui.email, ui.name, ui.role, ui.expires_at,

@@ -4,6 +4,7 @@ import {
 } from './authorization-boundaries.test';
 import {
   testBookingUpdateInvariants,
+  testBookingCreationPilotGuards,
   testPaymentTotals,
   testTenantContextIsolation,
 } from './core-invariants.test';
@@ -23,6 +24,7 @@ import { testLoggerRedaction } from './logger-redaction.test';
 import { testErrorMonitor } from './error-monitor.test';
 import { testProofPrivacy, testProofAuthorizationMiddleware } from './proof-privacy.test';
 import { testReminderQueriesAreTenantScoped } from './tenant-scope-regression.test';
+import { testCanonicalSlotFormatting } from './canonical-slot-formatting.test';
 
 async function run() {
   testRolePermissions();
@@ -30,6 +32,7 @@ async function run() {
   testPaymentTotals();
   testTenantContextIsolation();
   testBookingUpdateInvariants();
+  testBookingCreationPilotGuards();
   testInvoiceCalculations();
   testInvoiceCalculationValidation();
   await testInvoicePDFGeneration();
@@ -45,6 +48,7 @@ async function run() {
   testProofPrivacy();
   await testProofAuthorizationMiddleware();
   testReminderQueriesAreTenantScoped();
+  testCanonicalSlotFormatting();
   console.log('Hall Sync reliability tests passed');
 }
 

@@ -7,6 +7,9 @@ import { PackageRepository } from '../repositories/PackageRepository';
 import { HallRepository } from '../repositories/HallRepository';
 import { Package, CreatePackageDTO, UpdatePackageDTO, PackageSearchParams } from '../models/Package';
 import { validateRequired, isPositiveNumber } from '../utils/validation';
+import { getTenantId } from '../utils/tenantContext';
+import pool from '../config/db';
+import { RowDataPacket } from 'mysql2';
 
 export class PackageService {
   private packageRepo: PackageRepository;
@@ -94,6 +97,19 @@ export class PackageService {
     const existing = await this.packageRepo.findById(id);
     if (!existing) {
       throw new Error('Package not found');
+    }
+
+    const tenantId = getTenantId();
+    const [bookingRows] = await pool.execute<RowDataPacket[]>(
+      'SELECT COUNT(*) as count FROM bookings WHERE package_id = ? AND tenant_id = ? AND status != "cancelled"',
+      [id, tenantId]
+    );
+
+    const activeBookingsCount = Number(bookingRows[0]?.count || 0);
+    if (activeBookingsCount > 0) {
+      throw new Error(
+        `Cannot delete package "${existing.name}" because it is assigned to ${activeBookingsCount} active booking(s). Please reassign or cancel linked bookings first.`
+      );
     }
 
     return await this.packageRepo.delete(id);

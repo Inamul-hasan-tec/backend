@@ -8,6 +8,8 @@ import { Hall, CreateHallDTO, UpdateHallDTO, HallSearchParams } from '../models/
 import { validateRequired, isPositiveNumber } from '../utils/validation';
 import { getTenantId } from '../utils/tenantContext';
 import { SlotService } from './SlotService';
+import pool from '../config/db';
+import { RowDataPacket } from 'mysql2';
 
 export class HallService {
   private hallRepo: HallRepository;
@@ -52,12 +54,44 @@ export class HallService {
       throw new Error('Base price must be a positive number');
     }
 
-    const hallId = await this.hallRepo.create(data);
     const tenantId = getTenantId();
+    const normalizedName = data.name.trim();
+    const [existingRows] = await pool.execute<RowDataPacket[]>(
+      'SELECT id FROM halls WHERE tenant_id = ? AND LOWER(name) = LOWER(?) LIMIT 1',
+      [tenantId, normalizedName]
+    );
+
+    if (existingRows.length > 0) {
+      const existingHallId = Number(existingRows[0].id);
+      try {
+        await this.slotService.generateCurrentTenantHallSlotsForCurrentMonthUntilSubscriptionEnd(existingHallId);
+      } catch (error) {
+        console.warn('Existing hall returned, but slot sync retry failed:', {
+          hallId: existingHallId,
+          tenantId,
+          error: error instanceof Error ? error.message : error,
+        });
+      }
+      return existingHallId;
+    }
+
+    const createData = {
+      ...data,
+      name: normalizedName,
+    };
+    const hallId = await this.hallRepo.create(createData);
 
     // New halls should immediately receive their subscription-backed inventory.
     // This is idempotent and never overwrites booked/blocked slots.
-    await this.slotService.generateSlotsForHallUntilSubscriptionEnd(tenantId, hallId);
+    try {
+      await this.slotService.generateCurrentTenantHallSlotsForCurrentMonthUntilSubscriptionEnd(hallId);
+    } catch (error) {
+      console.warn('Hall created, but initial slot sync failed:', {
+        hallId,
+        tenantId: getTenantId(),
+        error: error instanceof Error ? error.message : error,
+      });
+    }
 
     return hallId;
   }
@@ -92,6 +126,19 @@ export class HallService {
     const existing = await this.hallRepo.findById(id);
     if (!existing) {
       throw new Error('Hall not found');
+    }
+
+    const tenantId = getTenantId();
+    const [bookingRows] = await pool.execute<RowDataPacket[]>(
+      'SELECT COUNT(*) as count FROM bookings WHERE hall_id = ? AND tenant_id = ? AND status != "cancelled"',
+      [id, tenantId]
+    );
+
+    const activeBookingsCount = Number(bookingRows[0]?.count || 0);
+    if (activeBookingsCount > 0) {
+      throw new Error(
+        `Cannot delete hall "${existing.name}" because it has ${activeBookingsCount} active booking(s) assigned. Please reassign or cancel linked bookings first.`
+      );
     }
 
     return await this.hallRepo.delete(id);

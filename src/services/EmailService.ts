@@ -269,6 +269,40 @@ export class EmailService {
   }
 
   /**
+   * Get booking confirmation email preview
+   */
+  getBookingConfirmationPreview(data: BookingEmailData): { subject: string; to: string; html: string } {
+    const timeSlotText = data.time_slot === 'morning' ? 'Morning (6AM-12PM)' :
+                        data.time_slot === 'afternoon' ? 'Afternoon (12PM-6PM)' :
+                        'Night (6PM-12AM)';
+    const eventDate = format(new Date(data.event_date), 'MMMM dd, yyyy');
+    const dueDate = new Date(data.event_date);
+    dueDate.setDate(dueDate.getDate() - 7);
+    const dueDateText = format(dueDate, 'MMMM dd, yyyy');
+
+    return {
+      subject: `Booking Confirmed - ${data.hall_name} - ${eventDate}`,
+      to: data.customer_email || '',
+      html: this.getBookingConfirmationTemplate(data, timeSlotText, eventDate, dueDateText),
+    };
+  }
+
+  /**
+   * Get payment reminder email preview
+   */
+  getPaymentReminderPreview(data: PaymentReminderData): { subject: string; to: string; html: string } {
+    const timeSlotText = data.time_slot === 'morning' ? 'Morning (6AM-12PM)' :
+                        data.time_slot === 'afternoon' ? 'Afternoon (12PM-6PM)' :
+                        'Night (6PM-12AM)';
+    const eventDate = format(new Date(data.event_date), 'MMMM dd, yyyy');
+    return {
+      subject: `Payment Reminder - Balance Due ₹${Number(data.balance_amount || 0).toLocaleString('en-IN')}`,
+      to: data.customer_email || '',
+      html: this.getPaymentReminderTemplate(data, timeSlotText, eventDate),
+    };
+  }
+
+  /**
    * Send payment reminder email
    */
   async sendPaymentReminder(data: PaymentReminderData): Promise<EmailSendResult> {

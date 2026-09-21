@@ -260,6 +260,42 @@ export class SettingsController {
   }
 
   // ============================================
+  // Operations Settings
+  // ============================================
+  async getOperationSettings(req: Request, res: Response): Promise<void> {
+    try {
+      const settings = await this.settingsService.getOperationSettings();
+      res.json({ success: true, data: settings });
+    } catch (error: any) {
+      console.error('Get operation settings error:', error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  }
+
+  async updateOperationSettings(req: Request, res: Response): Promise<void> {
+    try {
+      const settings = await this.settingsService.updateOperationSettings(req.body);
+      await AuditRepository.recordTenant({
+        actorUserId: req.user?.id,
+        action: 'operation_settings.updated',
+        entityType: 'tenant_operation_settings',
+        entityId: getTenantId(),
+        newValues: req.body,
+        ipAddress: req.ip,
+      });
+
+      res.json({
+        success: true,
+        message: 'Operations settings updated successfully',
+        data: settings,
+      });
+    } catch (error: any) {
+      console.error('Update operation settings error:', error);
+      res.status(400).json({ success: false, error: error.message });
+    }
+  }
+
+  // ============================================
   // Billing & Subscription
   // ============================================
   async getSubscriptionPlans(req: Request, res: Response): Promise<void> {

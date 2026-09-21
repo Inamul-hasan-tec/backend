@@ -9,6 +9,7 @@ import { successResponse, errorResponse } from '../utils/response';
 import { asyncHandler } from '../middleware/errorHandler';
 import EmailService from '../services/EmailService';
 import NotificationService from '../services/NotificationService';
+import BookingReadinessService from '../services/BookingReadinessService';
 
 const bookingService = new BookingService();
 
@@ -95,6 +96,21 @@ export const getBookingById = asyncHandler(async (req: Request, res: Response) =
 });
 
 /**
+ * GET /api/bookings/:id/readiness
+ * Get event readiness summary for booking operations.
+ */
+export const getBookingReadiness = asyncHandler(async (req: Request, res: Response) => {
+  const id = parseInt(req.params.id);
+  const readiness = await BookingReadinessService.getReadiness(id);
+
+  if (!readiness) {
+    return res.status(404).json(errorResponse('Booking not found'));
+  }
+
+  res.json(successResponse('Booking readiness retrieved successfully', readiness));
+});
+
+/**
  * POST /api/bookings
  * Create new booking
  */
@@ -106,6 +122,8 @@ export const createBooking = asyncHandler(async (req: Request, res: Response) =>
     // Create booking
     const bookingId = await bookingService.createBooking({
       ...req.body,
+      idempotency_key:
+        String(req.headers['idempotency-key'] || req.body.idempotency_key || '').trim() || undefined,
       created_by: req.user?.id,
     });
     console.log(`✅ Booking created with ID: ${bookingId} in ${Date.now() - startTime}ms`);
@@ -190,7 +208,8 @@ export const confirmBooking = asyncHandler(async (req: Request, res: Response) =
  */
 export const cancelBooking = asyncHandler(async (req: Request, res: Response) => {
   const id = parseInt(req.params.id);
-  await bookingService.cancelBooking(id);
+  const reason = typeof req.body?.reason === 'string' ? req.body.reason.trim() : undefined;
+  await bookingService.cancelBooking(id, reason, req.user?.id);
   const booking = await bookingService.getBookingById(id);
   if (booking) {
     NotificationService.bookingUpdated(req.user?.id, booking, 'cancelled');

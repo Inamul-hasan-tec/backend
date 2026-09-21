@@ -9,6 +9,10 @@ import { CustomerRepository } from '../repositories/CustomerRepository';
 import { HallRepository } from '../repositories/HallRepository';
 import { PackageRepository } from '../repositories/PackageRepository';
 import { SlotService } from './SlotService';
+import RateService from './RateService';
+import EmployeeRepository from '../repositories/EmployeeRepository';
+import { SettingsRepository } from '../repositories/SettingsRepository';
+import { getTenantId } from '../utils/tenantContext';
 import { Booking, BookingDetails, CreateBookingDTO, UpdateBookingDTO, BookingSearchParams } from '../models/Booking';
 import { validateRequired, isValidDate, isPositiveNumber } from '../utils/validation';
 
@@ -31,8 +35,8 @@ export class BookingService {
   /**
    * Get all bookings
    */
-  async getAllBookings(limit?: number, offset?: number): Promise<Booking[]> {
-    return await this.bookingRepo.findAll(limit, offset);
+  async getAllBookings(limit?: number, offset?: number): Promise<BookingDetails[]> {
+    return await this.bookingRepo.search({ limit, offset });
   }
 
   /**
@@ -79,7 +83,6 @@ export class BookingService {
       throw new Error('Hall does not have a tenant_id assigned');
     }
 
-    let packagePrice = 0;
     // Validate package if provided
     if (data.package_id) {
       const pkg = await this.packageRepo.findById(data.package_id);
@@ -92,7 +95,6 @@ export class BookingService {
       if (pkg.hall_id && Number(pkg.hall_id) !== Number(data.hall_id)) {
         throw new Error('Selected package is not available for this hall');
       }
-      packagePrice = Number(pkg.base_price || 0);
     }
 
     // Validate event date
@@ -109,6 +111,20 @@ export class BookingService {
       throw new Error('Event date must be in the future');
     }
 
+    const isEventDateInsideSubscription = await this.slotService.isDateWithinCurrentTenantSlotEntitlement(eventDate);
+    if (!isEventDateInsideSubscription) {
+      throw new Error('Selected booking date is outside the active subscription period');
+    }
+
+    const idempotencyKey =
+      typeof data.idempotency_key === 'string' ? data.idempotency_key.trim() : '';
+    if (idempotencyKey) {
+      const existingBookingId = await this.bookingRepo.findIdByIdempotencyKey(idempotencyKey);
+      if (existingBookingId) {
+        return existingBookingId;
+      }
+    }
+
     // Slot ID and slot type form one selection and must be supplied together.
     if ((data.slot_id && !data.time_slot) || (!data.slot_id && data.time_slot)) {
       throw new Error('Slot and time slot must be selected together');
@@ -119,6 +135,17 @@ export class BookingService {
       const slot = await this.slotService.getSlotById(data.slot_id);
       if (!slot) {
         throw new Error('Slot not found');
+      }
+      const slotDate = slot.slot_date instanceof Date
+        ? [
+            slot.slot_date.getFullYear(),
+            String(slot.slot_date.getMonth() + 1).padStart(2, '0'),
+            String(slot.slot_date.getDate()).padStart(2, '0'),
+          ].join('-')
+        : String(slot.slot_date).slice(0, 10);
+      const isInsideSlotEntitlement = await this.slotService.isDateWithinCurrentTenantSlotEntitlement(slotDate);
+      if (!isInsideSlotEntitlement) {
+        throw new Error('Selected slot is outside the active subscription period');
       }
       if (slot.status !== 'available') {
         throw new Error('Slot is not available');
@@ -137,9 +164,14 @@ export class BookingService {
       }
     }
 
-    // Server-authoritative pricing:
-    // hall base rent + selected package/service add-on price.
-    const totalAmount = Number(hall.base_price || 0) + packagePrice;
+    const timeSlot = data.time_slot || 'full_day';
+    const ratePreview = await RateService.preview({
+      hall_id: data.hall_id,
+      event_date: eventDate,
+      slot_type: timeSlot,
+      package_id: data.package_id || null,
+    });
+    const totalAmount = ratePreview.total_amount;
     if (!isPositiveNumber(totalAmount)) {
       throw new Error('Booking total must be a positive number');
     }
@@ -152,12 +184,20 @@ export class BookingService {
 
     // Calculate balance
     const balance_amount = totalAmount - data.advance_amount;
-
     // Create booking with tenant_id from hall
     const bookingData = {
       ...data,
       tenant_id: hall.tenant_id, // Include tenant_id from hall
       event_date: eventDate as any,
+      time_slot: timeSlot,
+      hall_rate_amount: ratePreview.hall_rate,
+      package_amount: ratePreview.package_amount,
+      pricing_snapshot: JSON.stringify({
+        ...ratePreview,
+        ...(idempotencyKey ? { idempotency_key: idempotencyKey } : {}),
+        snapshot_type: 'internal_customer_quote',
+        captured_at: new Date().toISOString(),
+      }),
       total_amount: totalAmount,
       balance_amount,
       status: 'confirmed' as const, // Auto-confirm bookings
@@ -185,7 +225,7 @@ export class BookingService {
     if (existing.status === 'completed') {
       throw new Error('Cannot update completed booking');
     }
-    if (data.status !== undefined) {
+    if (data.status !== undefined && data.status !== existing.status) {
       throw new Error('Use the booking status actions to change status');
     }
 
@@ -205,7 +245,6 @@ export class BookingService {
     }
 
     const packageId = data.package_id ?? existing.package_id;
-    let packagePrice = 0;
     if (packageId) {
       const pkg = await this.packageRepo.findById(packageId);
       if (!pkg) {
@@ -217,7 +256,6 @@ export class BookingService {
       if (pkg.hall_id && Number(pkg.hall_id) !== Number(hallId)) {
         throw new Error('Selected package is not available for this hall');
       }
-      packagePrice = Number(pkg.base_price || 0);
     }
 
     const eventDate = normalizeBookingDate(data.event_date ?? existing.event_date);
@@ -235,7 +273,13 @@ export class BookingService {
       throw new Error('Invalid time slot');
     }
 
-    const total = Number(hall.base_price || 0) + packagePrice;
+    const ratePreview = await RateService.preview({
+      hall_id: hallId,
+      event_date: eventDate,
+      slot_type: timeSlot as any,
+      package_id: packageId || null,
+    });
+    const total = ratePreview.total_amount;
     const advance = Number(data.advance_amount ?? existing.advance_amount);
     const balanceAmount = validateBookingAmounts(total, advance);
 
@@ -244,6 +288,14 @@ export class BookingService {
       {
         ...data,
         event_date: eventDate as any,
+        time_slot: timeSlot as any,
+        hall_rate_amount: ratePreview.hall_rate,
+        package_amount: ratePreview.package_amount,
+        pricing_snapshot: JSON.stringify({
+          ...ratePreview,
+          snapshot_type: 'internal_customer_quote',
+          captured_at: new Date().toISOString(),
+        }),
         total_amount: total,
         balance_amount: balanceAmount,
       },
@@ -254,21 +306,21 @@ export class BookingService {
   /**
    * Cancel booking
    */
-  async cancelBooking(id: number): Promise<boolean> {
+  async cancelBooking(id: number, reason?: string, cancelledBy?: number): Promise<boolean> {
     const existing = await this.bookingRepo.findById(id);
     if (!existing) {
       throw new Error('Booking not found');
     }
 
     if (existing.status === 'cancelled') {
-      throw new Error('Booking is already cancelled');
+      return true;
     }
 
     if (existing.status === 'completed') {
       throw new Error('Cannot cancel completed booking');
     }
 
-    return await this.bookingRepo.cancel(id);
+    return await this.bookingRepo.cancel(id, reason, cancelledBy);
   }
 
   /**
@@ -328,14 +380,51 @@ export class BookingService {
       throw new Error('Only confirmed bookings can be completed');
     }
 
+    // Check strict staff closeout rule if enabled
+    const settingsRepo = new SettingsRepository();
+    const opSettings = await settingsRepo.getOperationSettings(getTenantId());
+    const isStaffingMode = ['event_staffing', 'advanced'].includes(opSettings?.employee_mode);
+    const requireStaffCloseout = Boolean(opSettings?.require_staff_for_event_closeout);
+
+    if (isStaffingMode && requireStaffCloseout) {
+      const assignmentData = await EmployeeRepository.getAssignments(id);
+      const summary = assignmentData?.summary || { total: 0, planned: 0, confirmed: 0, checked_in: 0, completed: 0, no_show: 0 };
+      
+      if (summary.total === 0) {
+        throw new Error('Event closeout requires at least one duty assignment before completion.');
+      }
+      if (summary.planned > 0) {
+        throw new Error('Event closeout requires all assigned duties to be confirmed or accepted.');
+      }
+      if (summary.no_show > 0) {
+        throw new Error('Event closeout has unresolved no-show staff duties. Please resolve or replace them.');
+      }
+      if (summary.completed + summary.checked_in < summary.total) {
+        throw new Error('Event closeout requires all assigned staff duties to be checked in or completed.');
+      }
+    }
+
     return await this.bookingRepo.update(id, { status: 'completed' });
   }
 }
 
 export function normalizeBookingDate(value: string | Date): string {
-  return typeof value === 'string'
-    ? value.slice(0, 10)
-    : value.toISOString().slice(0, 10);
+  if (typeof value === 'string') {
+    if (value.includes('T')) {
+      const parsed = new Date(value);
+      if (!Number.isNaN(parsed.getTime())) {
+        const year = parsed.getFullYear();
+        const month = String(parsed.getMonth() + 1).padStart(2, '0');
+        const day = String(parsed.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+      }
+    }
+    return value.slice(0, 10);
+  }
+  const year = value.getFullYear();
+  const month = String(value.getMonth() + 1).padStart(2, '0');
+  const day = String(value.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 }
 
 export function validateBookingAmounts(

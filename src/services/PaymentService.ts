@@ -19,7 +19,7 @@ export class PaymentService {
    * Get all payments
    */
   async getAllPayments(limit?: number, offset?: number): Promise<Payment[]> {
-    return await this.paymentRepo.findAll(limit, offset);
+    return await this.paymentRepo.findAllPayments(limit, offset);
   }
 
   /**
