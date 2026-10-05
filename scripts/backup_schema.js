@@ -91,7 +91,7 @@ function sameNames(actual, expected) {
 
 async function verifyRestoredViews(connection, database) {
   const [views] = await connection.query(
-    'SELECT table_name AS name, view_definition AS definition, definer FROM information_schema.views WHERE table_schema = DATABASE()'
+    'SELECT table_name AS name, view_definition AS definition, DEFINER AS definer FROM information_schema.views WHERE table_schema = DATABASE()'
   );
   const [accounts] = await connection.query('SELECT CURRENT_USER() AS account');
   const checks = [];

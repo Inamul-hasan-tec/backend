@@ -82,12 +82,24 @@ function restoredMock(options = {}) {
     queries.push(sql);
     if (sql.includes('information_schema.views')) return [CORE_VIEWS.map(name => ({ name,
       definition: `select count(*) from \`${options.sourceBound ? 'hallsync_prod' : 'hallsync_restore_drill'}\`.\`bookings\``,
-      definer: options.wrongDefiner ? 'production@localhost' : 'restore@localhost' }))];
+      [/\bDEFINER\s+AS\s+definer\b/i.test(sql) ? 'definer' : 'DEFINER']:
+        options.wrongDefiner ? 'production@localhost' : 'restore@localhost' }))];
     if (sql.includes('CURRENT_USER')) return [[{ account: 'restore@localhost' }]];
     if (options.selectFails) throw new Error('Invalid view');
     return [[]];
   } };
 }
+test('mysql2 uppercase DEFINER metadata requires an explicit lowercase alias', async () => {
+  const connection = restoredMock();
+  const [unaliased] = await connection.query(
+    'SELECT table_name AS name, view_definition AS definition, definer FROM information_schema.views WHERE table_schema = DATABASE()'
+  );
+  assert.equal(unaliased[0].DEFINER, 'restore@localhost');
+  assert.equal(unaliased[0].definer, undefined);
+  const result = await verifyRestoredViews(connection, 'hallsync_restore_drill');
+  assert.equal(result.checks.length, CORE_VIEWS.length);
+  assert.ok(result.checks.every(check => check.definer_ok && check.select_ok && check.error === null));
+});
 test('restore checks query both required views using the restore database and account', async () => {
   const connection = restoredMock();
   const result = await verifyRestoredViews(connection, 'hallsync_restore_drill');
