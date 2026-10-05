@@ -5,35 +5,8 @@ const dotenv = require('dotenv');
 
 dotenv.config({ path: path.join(__dirname, '../.env') });
 
-const expectedMigrations = [
-  '300_platform_tenant_lifecycle.sql',
-  '301_subscription_billing.sql',
-  '302_booking_payment_integrity.sql',
-  '303_full_day_slots.sql',
-  '304_invoice_integrity.sql',
-  '305_invoice_payment_allocations.sql',
-  '306_booking_payment_mode.sql',
-  '307_subscription_collations.sql',
-  '308_auth_session_revocation.sql',
-  '309_invitations_subscription_policy.sql',
-  '310_user_phone.sql',
-  '311_tenant_upi_settings.sql',
-  '312_tenant_schema_drift_guards.sql',
-  '313_hall_scoped_packages.sql',
-  '314_discount_template_tenant_scope.sql',
-  '315_payment_machine.sql',
-  '316_hall_gallery.sql',
-  '317_calendar_insights.sql',
-  '318_owner_activity_notifications.sql',
-  '319_tenant_calendar_slot_mode.sql',
-  '320_event_inventory_operations.sql',
-  '321_inventory_master_strengthening_guards.sql',
-  '322_employee_management.sql',
-  '323_operation_settings.sql',
-  '324_operation_readiness_flexibility.sql',
-  '325_slot_calendar_query_indexes.sql',
-  '326_rate_studio.sql',
-];
+const { getMigrationFiles } = require('./platform_migration_inventory');
+const expectedMigrations = getMigrationFiles();
 
 const productionTarget = process.env.HALL_SYNC_PRODUCTION_TARGET === 'true';
 
@@ -191,6 +164,10 @@ function mask(value) {
 }
 
 async function main() {
+  const auditMode = process.env.MIGRATION_AUDIT_MODE || 'post';
+  if (!['pre', 'post'].includes(auditMode)) {
+    throw new Error('MIGRATION_AUDIT_MODE must be pre or post');
+  }
   const ssl =
     process.env.DB_SSL === 'true'
       ? {
@@ -217,6 +194,9 @@ async function main() {
     const [dbRows] = await connection.query(
       'SELECT DATABASE() AS db, @@hostname AS hostname, @@version AS version'
     );
+    if (!process.env.DB_NAME || dbRows[0].db !== process.env.DB_NAME) {
+      throw new Error('Connected database does not match configured DB_NAME');
+    }
     const [tableRows] = await connection.query(
       `SELECT table_name
        FROM information_schema.tables
@@ -349,11 +329,12 @@ async function main() {
       missingTables.length === 0 &&
       missingColumns.length === 0 &&
       invalidColumnCollations.length === 0 &&
-      pendingMigrations.length === 0 &&
+      (auditMode === 'pre' || pendingMigrations.length === 0) &&
       warnings.length === 0;
 
     const report = {
       ok,
+      audit_mode: auditMode,
       connection: {
         db: dbRows[0].db,
         hostname: dbRows[0].hostname,
@@ -368,6 +349,7 @@ async function main() {
       missing_tables: missingTables,
       missing_columns: missingColumns,
       invalid_column_collations: invalidColumnCollations,
+      expected_platform_migrations: expectedMigrations,
       applied_platform_migrations: appliedMigrations.filter((migration) =>
         expectedMigrations.includes(migration)
       ),
@@ -381,12 +363,17 @@ async function main() {
 
     console.log(JSON.stringify(report, null, 2));
     process.exitCode = ok ? 0 : 2;
+    return report;
   } finally {
     await connection.end();
   }
 }
 
-main().catch((error) => {
-  console.error('Schema audit failed:', error.message);
-  process.exitCode = 1;
-});
+if (require.main === module) {
+  main().catch((error) => {
+    console.error('Schema audit failed:', error.message);
+    process.exitCode = 1;
+  });
+}
+
+module.exports = { main };

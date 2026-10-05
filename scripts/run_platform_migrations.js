@@ -5,30 +5,7 @@ const dotenv = require('dotenv');
 
 dotenv.config({ path: path.join(__dirname, '../.env') });
 
-/**
- * Dynamically discover and sort all migration files in migrations/ directory
- */
-function getMigrationFiles() {
-  const migrationsDir = path.join(__dirname, '../migrations');
-  if (!fs.existsSync(migrationsDir)) {
-    throw new Error(`Migrations directory not found at: ${migrationsDir}`);
-  }
-
-  const files = fs.readdirSync(migrationsDir);
-  
-  // Filter for platform SQL migration files starting with 3xx (e.g. 300_xxx.sql, 322_xxx.sql)
-  const sqlFiles = files.filter(f => f.endsWith('.sql') && /^3\d{2}_/.test(f));
-
-  // Sort numerically by prefix number (e.g. 300 < 301 < ... < 320)
-  sqlFiles.sort((a, b) => {
-    const numA = parseInt(a.split('_')[0], 10) || 0;
-    const numB = parseInt(b.split('_')[0], 10) || 0;
-    if (numA !== numB) return numA - numB;
-    return a.localeCompare(b);
-  });
-
-  return sqlFiles;
-}
+const { getMigrationFiles } = require('./platform_migration_inventory');
 
 function splitSqlStatements(sql) {
   // Remove multi-line comments /* ... */
@@ -152,13 +129,7 @@ async function run() {
       const statements = splitSqlStatements(sql);
       for (const statement of statements) {
         if (!statement || statement.startsWith('--')) continue;
-        try {
-          await connection.query(statement);
-        } catch (stmtErr) {
-          if (!stmtErr.message.includes('already exists') && !stmtErr.message.includes('Duplicate')) {
-            throw stmtErr;
-          }
-        }
+        await connection.query(statement);
       }
 
       await connection.query(
@@ -174,7 +145,11 @@ async function run() {
   }
 }
 
-run().catch((error) => {
-  console.error('❌ Platform migration failed:', error.message);
-  process.exitCode = 1;
-});
+if (require.main === module) {
+  run().catch((error) => {
+    console.error('❌ Platform migration failed:', error.message);
+    process.exitCode = 1;
+  });
+}
+
+module.exports = { run, splitSqlStatements };

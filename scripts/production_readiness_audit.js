@@ -4,6 +4,7 @@ const mysql = require('mysql2/promise');
 const dotenv = require('dotenv');
 const { verifyBackup } = require('./verify_database_backup');
 const { backupDir: resolveBackupDir, backupHeartbeatPath } = require('./backup_paths');
+const { getMigrationFiles } = require('./platform_migration_inventory');
 
 dotenv.config({ path: path.join(__dirname, '../.env') });
 
@@ -153,41 +154,11 @@ async function main() {
   });
 
   try {
-    const [migrationRows] = await connection.query(
-      `SELECT COUNT(*) AS pending
-       FROM (
-         SELECT '300_platform_tenant_lifecycle.sql' AS migration_name UNION ALL
-         SELECT '301_subscription_billing.sql' UNION ALL
-         SELECT '302_booking_payment_integrity.sql' UNION ALL
-         SELECT '303_full_day_slots.sql' UNION ALL
-         SELECT '304_invoice_integrity.sql' UNION ALL
-         SELECT '305_invoice_payment_allocations.sql' UNION ALL
-         SELECT '306_booking_payment_mode.sql' UNION ALL
-         SELECT '307_subscription_collations.sql' UNION ALL
-         SELECT '308_auth_session_revocation.sql'
-         UNION ALL SELECT '309_invitations_subscription_policy.sql'
-         UNION ALL SELECT '310_user_phone.sql'
-         UNION ALL SELECT '311_tenant_upi_settings.sql'
-         UNION ALL SELECT '312_tenant_schema_drift_guards.sql'
-         UNION ALL SELECT '313_hall_scoped_packages.sql'
-         UNION ALL SELECT '314_discount_template_tenant_scope.sql'
-         UNION ALL SELECT '315_payment_machine.sql'
-         UNION ALL SELECT '316_hall_gallery.sql'
-         UNION ALL SELECT '317_calendar_insights.sql'
-         UNION ALL SELECT '318_owner_activity_notifications.sql'
-         UNION ALL SELECT '319_tenant_calendar_slot_mode.sql'
-         UNION ALL SELECT '320_event_inventory_operations.sql'
-         UNION ALL SELECT '321_inventory_master_strengthening_guards.sql'
-         UNION ALL SELECT '322_employee_management.sql'
-         UNION ALL SELECT '323_operation_settings.sql'
-         UNION ALL SELECT '324_operation_readiness_flexibility.sql'
-         UNION ALL SELECT '325_slot_calendar_query_indexes.sql'
-         UNION ALL SELECT '326_rate_studio.sql'
-       ) expected
-       LEFT JOIN schema_migrations sm ON sm.migration_name = expected.migration_name
-       WHERE sm.migration_name IS NULL`
-    );
-    check(checks, 'blocker', 'Platform migrations complete', Number(migrationRows[0].pending) === 0, `pending=${migrationRows[0].pending}`);
+    const expectedMigrations = getMigrationFiles();
+    const [migrationRows] = await connection.query('SELECT migration_name FROM schema_migrations');
+    const appliedMigrations = new Set(migrationRows.map(row => row.migration_name));
+    const pendingMigrations = expectedMigrations.filter(file => !appliedMigrations.has(file));
+    check(checks, 'blocker', 'Platform migrations complete', pendingMigrations.length === 0, `pending=${pendingMigrations.length}`);
 
     const [superAdminRows] = await connection.query(
       `SELECT COUNT(*) AS count

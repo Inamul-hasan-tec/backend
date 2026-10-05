@@ -1,6 +1,6 @@
 const { spawn } = require('child_process');
 
-function run(label, command, args, env = process.env, allowFailure = false) {
+function run(label, command, args, env = process.env) {
   return new Promise((resolve, reject) => {
     console.log(`\n==> ${label}`);
     const child = spawn(command, args, {
@@ -10,7 +10,7 @@ function run(label, command, args, env = process.env, allowFailure = false) {
 
     child.on('error', reject);
     child.on('close', (code) => {
-      if (code === 0 || allowFailure) {
+      if (code === 0) {
         resolve(code);
       } else {
         reject(new Error(`${label} failed with code ${code}`));
@@ -20,7 +20,11 @@ function run(label, command, args, env = process.env, allowFailure = false) {
 }
 
 async function main() {
-  await run('Pre-migration audit', 'node', ['scripts/audit_staging_schema.js'], process.env, true);
+  await run('Pre-migration audit', 'node', ['scripts/audit_staging_schema.js'], {
+    ...process.env,
+    HALL_SYNC_PRODUCTION_TARGET: 'true',
+    MIGRATION_AUDIT_MODE: 'pre',
+  });
   await run('Database backup', 'node', ['scripts/backup_database.js']);
   await run(
     'Apply platform migrations',
@@ -34,10 +38,15 @@ async function main() {
   await run('Post-migration audit', 'node', ['scripts/audit_staging_schema.js'], {
     ...process.env,
     HALL_SYNC_PRODUCTION_TARGET: 'true',
+    MIGRATION_AUDIT_MODE: 'post',
   });
 }
 
-main().catch((error) => {
-  console.error('Production migration window failed:', error.message);
-  process.exitCode = 1;
-});
+if (require.main === module) {
+  main().catch((error) => {
+    console.error('Production migration window failed:', error.message);
+    process.exitCode = 1;
+  });
+}
+
+module.exports = { main };
