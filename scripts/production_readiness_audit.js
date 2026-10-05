@@ -307,8 +307,16 @@ async function main() {
       'warning',
       'Latest backup is portable for isolated restore',
       backupVerification?.portable_restore === true,
-      backupVerification?.portable_restore === true ? 'portable_restore=true' : 'create a v2 backup'
+      backupVerification?.portable_restore === true ? 'portable_restore=true' : 'create a schema-complete v3 backup'
     );
+    const [liveViews] = await connection.query(
+      'SELECT table_name AS name FROM information_schema.views WHERE table_schema = DATABASE()'
+    );
+    const { sameNames } = require('./backup_schema');
+    check(checks, 'blocker', 'Latest backup includes current tables and views',
+      backupVerification?.base_table_count === Number(backupRows[0].count) &&
+      sameNames(liveViews.map(row => row.name), backupVerification?.view_names),
+      `live base tables=${backupRows[0].count}, views=${liveViews.length}`);
     const backupAgeHours = latestBackup
       ? (Date.now() - latestBackup.time) / (60 * 60 * 1000)
       : Infinity;

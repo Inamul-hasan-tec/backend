@@ -9,6 +9,7 @@
     "start": "node dist/server.js",
     "watch": "nodemon --exec ts-node src/server.ts",
     "test": "ts-node tests/run.ts",
+    "test:backup": "node --test tests/backup-schema.test.js",
     "migrate:platform": "node scripts/run_platform_migrations.js",
     "staging:audit": "node scripts/audit_staging_schema.js",
     "production:audit": "HALL_SYNC_PRODUCTION_TARGET=true node scripts/audit_staging_schema.js",

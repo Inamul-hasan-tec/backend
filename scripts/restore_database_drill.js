@@ -4,6 +4,7 @@ const { spawn } = require('child_process');
 const mysql = require('mysql2/promise');
 const dotenv = require('dotenv');
 const { verifyBackup } = require('./verify_database_backup');
+const { sameNames, verifyRestoredViews } = require('./backup_schema');
 
 dotenv.config({ path: path.join(__dirname, '../.env') });
 
@@ -18,7 +19,7 @@ function restoreConfig() {
   if (!/^[A-Za-z0-9_-]+$/.test(database)) {
     throw new Error('RESTORE_DB_NAME contains unsupported characters');
   }
-  if (database === process.env.DB_NAME) {
+  if (database.toLowerCase() === (process.env.DB_NAME || '').toLowerCase()) {
     throw new Error('Restore target must not be the production/source database');
   }
   if (process.env.RESTORE_DRILL_CONFIRM !== 'true') {
@@ -78,8 +79,11 @@ async function main() {
   const config = restoreConfig();
   const backupPath = path.resolve(required('BACKUP_FILE'));
   const verification = verifyBackup(backupPath);
+  if (config.database.toLowerCase() === String(verification.database).toLowerCase()) {
+    throw new Error('Restore target must not equal the backup source database');
+  }
   if (!verification.portable_restore) {
-    throw new Error('Backup is not marked portable_restore=true; create a new v2 backup first');
+    throw new Error('Backup is not marked portable_restore=true; create a new v3 backup first');
   }
 
   const connection = await mysql.createConnection({
@@ -92,10 +96,10 @@ async function main() {
       `SELECT COUNT(*) AS count
        FROM information_schema.tables
        WHERE table_schema = DATABASE()
-         AND table_type = 'BASE TABLE'`
+         AND table_type IN ('BASE TABLE', 'VIEW')`
     );
     if (Number(beforeRows[0].count) !== 0) {
-      throw new Error(`Restore target must be empty; found ${beforeRows[0].count} base tables`);
+      throw new Error(`Restore target must be empty; found ${beforeRows[0].count} tables/views`);
     }
   } finally {
     await connection.end();
@@ -107,6 +111,9 @@ async function main() {
   let tableCount;
   let criticalTables;
   let migrationCount;
+  let restoredViews;
+  let restoredTables;
+  let viewChecks;
   try {
     const [tableRows] = await restored.query(
       `SELECT COUNT(*) AS count
@@ -115,6 +122,13 @@ async function main() {
          AND table_type = 'BASE TABLE'`
     );
     tableCount = Number(tableRows[0].count);
+    const [allTables] = await restored.query(
+      "SELECT table_name AS name FROM information_schema.tables WHERE table_schema = DATABASE() AND table_type = 'BASE TABLE'"
+    );
+    restoredTables = allTables.map(row => row.name);
+    const views = await verifyRestoredViews(restored, config.database);
+    restoredViews = views.names;
+    viewChecks = views.checks;
 
     const expectedTables = [
       'tenants', 'users', 'user_tenants', 'customers', 'halls', 'packages',
@@ -137,7 +151,9 @@ async function main() {
   }
 
   const missingCritical = criticalTables.filter((table) => !table.present);
-  const ok = tableCount === verification.base_table_count && missingCritical.length === 0;
+  const ok = tableCount === verification.base_table_count && missingCritical.length === 0 &&
+    sameNames(restoredTables, verification.base_table_names) &&
+    sameNames(restoredViews, verification.view_names) && viewChecks.every(view => !view.error);
   const report = {
     ok,
     completed_at: new Date().toISOString(),
@@ -147,6 +163,11 @@ async function main() {
     sha256: verification.sha256,
     expected_base_table_count: verification.base_table_count,
     restored_base_table_count: tableCount,
+    expected_view_count: verification.view_count,
+    restored_view_count: restoredViews.length,
+    expected_view_names: verification.view_names,
+    restored_view_names: restoredViews,
+    view_checks: viewChecks,
     schema_migration_count: migrationCount,
     critical_tables: criticalTables,
   };
