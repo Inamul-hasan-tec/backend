@@ -67,9 +67,26 @@ interface SlotEntitlementWindow {
 
 export class SlotService {
   private slotRepository: SlotRepository;
+  private hallsHasIsActiveColumn: boolean | null = null;
 
   constructor() {
     this.slotRepository = new SlotRepository();
+  }
+
+  private async hallsSupportActiveFlag(): Promise<boolean> {
+    if (this.hallsHasIsActiveColumn !== null) {
+      return this.hallsHasIsActiveColumn;
+    }
+
+    const [rows] = await pool.query<RowDataPacket[]>(
+      `SELECT COUNT(*) as count
+       FROM information_schema.columns
+       WHERE table_schema = DATABASE()
+         AND table_name = 'halls'
+         AND column_name = 'is_active'`
+    );
+    this.hallsHasIsActiveColumn = Number(rows[0]?.count || 0) > 0;
+    return this.hallsHasIsActiveColumn;
   }
 
   private async getSlotTypesForTenant(tenantId: number): Promise<SlotType[]> {
@@ -790,8 +807,11 @@ export class SlotService {
     );
     const slotTypes = SLOT_TYPES_BY_MODE[slotMode];
 
+    const hasHallActiveFlag = await this.hallsSupportActiveFlag();
     const [hallRows] = await pool.execute<RowDataPacket[]>(
-      'SELECT id, name FROM halls WHERE tenant_id = ? AND is_active = true ORDER BY name ASC',
+      hasHallActiveFlag
+        ? 'SELECT id, name FROM halls WHERE tenant_id = ? AND is_active = true ORDER BY name ASC'
+        : 'SELECT id, name FROM halls WHERE tenant_id = ? ORDER BY name ASC',
       [tenantId]
     );
 
