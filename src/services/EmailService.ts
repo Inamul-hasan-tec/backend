@@ -98,6 +98,9 @@ function emailShell(options: {
   body: string;
   footer?: string;
 }): string {
+  // Email images need absolute public URLs; venue billing identity stays in the document.
+  const brandLogoUrl = new URL('/HallSync_Faithful_Brand_Kit/hallsync-horizontal.png',
+    process.env.FRONTEND_URL || 'https://hallsync.in').href;
   return `
 <!doctype html>
 <html>
@@ -113,6 +116,7 @@ function emailShell(options: {
         <table role="presentation" width="640" cellspacing="0" cellpadding="0" style="width:100%;max-width:640px;background:#ffffff;border:1px solid #e2e8f0;border-radius:18px;overflow:hidden;">
           <tr>
             <td style="padding:28px 32px 22px;border-bottom:1px solid #e2e8f0;background:#ffffff;">
+              <img src="${escapeHtml(brandLogoUrl)}" alt="HallSync" width="180" height="41" style="display:block;width:180px;max-width:100%;height:auto;margin:0 0 20px;">
               <p style="margin:0 0 10px;font-size:11px;font-weight:700;letter-spacing:.18em;text-transform:uppercase;color:#2563eb;">${escapeHtml(options.eyebrow)}</p>
               <h1 style="margin:0;font-size:26px;line-height:1.2;color:#0f172a;">${escapeHtml(options.title)}</h1>
               <p style="margin:10px 0 0;font-size:15px;line-height:1.6;color:#475569;">${escapeHtml(options.intro)}</p>
